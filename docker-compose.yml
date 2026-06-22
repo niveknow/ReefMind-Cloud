@@ -1,0 +1,96 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: reefmind-postgres
+    environment:
+      POSTGRES_USER: reefmind
+      POSTGRES_PASSWORD: reefmind
+      POSTGRES_DB: reefmind
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - reefmind-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reefmind -d reefmind"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  influxdb:
+    image: influxdb:2.7
+    container_name: reefmind-influxdb
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: admin123
+      DOCKER_INFLUXDB_INIT_ORG: reefmind
+      DOCKER_INFLUXDB_INIT_BUCKET: reefmind_dev
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: reefmind-admin-token
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    # ports not mapped to host — accessed internally via service name on reefmind-net
+    networks:
+      - reefmind-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: reefmind-redis
+    # ports not mapped to host — accessed internally via service name on reefmind-net
+    networks:
+      - reefmind-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build: ./api
+    container_name: reefmind-api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://reefmind:reefmind@postgres:5432/reefmind
+      INFLUX_URL: http://influxdb:8086
+      INFLUX_TOKEN: reefmind-admin-token
+      INFLUX_ORG: reefmind
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - reefmind-net
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  web:
+    build: ./web
+    container_name: reefmind-web
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    networks:
+      - reefmind-net
+
+networks:
+  reefmind-net:
+    driver: bridge
+
+volumes:
+  pgdata:
+  influxdb_data:
