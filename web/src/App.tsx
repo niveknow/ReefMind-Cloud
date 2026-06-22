@@ -4,6 +4,8 @@ import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
 import SettingsPage from './pages/SettingsPage';
 import CsvImportPage from './pages/CsvImportPage';
+import WaterTestPage from './pages/WaterTestPage';
+import NotesPage from './pages/NotesPage';
 
 const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
   const token = localStorage.getItem('reefmind_token');
@@ -45,6 +47,22 @@ function App() {
           element={
             <ProtectedRoute>
               <CsvImportPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/water-tests"
+          element={
+            <ProtectedRoute>
+              <WaterTestPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/notes"
+          element={
+            <ProtectedRoute>
+              <NotesPage />
             </ProtectedRoute>
           }
         />

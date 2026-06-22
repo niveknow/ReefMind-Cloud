@@ -24,8 +24,9 @@ interface SidebarTab {
   id: string;
   label: string;
   icon: string;
-  did?: string;          // probe DID for history fetching
-  probeName?: string;    // display name from reading
+  did?: string;
+  probeName?: string;
+  href?: string;
 }
 
 // Map probe types to display icons/colors
@@ -151,6 +152,11 @@ export default function DashboardPage() {
     }
 
     tabs.push({ id: 'outlets', label: 'Outlets', icon: '🔌' });
+    // Page navigation links
+    tabs.push({ id: 'water-tests', label: 'Water Tests', icon: '🧪', href: '/water-tests' });
+    tabs.push({ id: 'notes', label: 'Tank Notes', icon: '📝', href: '/notes' });
+    tabs.push({ id: 'csv-import', label: 'CSV Import', icon: '📄', href: '/csv-import' });
+    tabs.push({ id: 'settings', label: 'Settings', icon: '⚙️', href: '/settings' });
     return tabs;
   })();
 
@@ -236,16 +242,27 @@ export default function DashboardPage() {
       <nav className="w-56 bg-slate-800 p-4 flex flex-col">
         <h2 className="text-teal-400 font-bold text-lg mb-6">ReefMind</h2>
 
-        {sidebarTabs.map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-            className={`text-left px-3 py-2 rounded mb-1 ${
-              activeTab === tab.id
-                ? 'bg-teal-600 text-white'
-                : 'text-slate-300 hover:bg-slate-700'
-            }`}>
-            {tab.icon} {tab.label}
-          </button>
-        ))}
+        {sidebarTabs.map(tab => {
+          if (tab.href) {
+            return (
+              <a key={tab.id} href={tab.href}
+                className="text-left px-3 py-2 rounded mb-1 text-slate-300 hover:bg-slate-700 hover:text-white"
+              >
+                {tab.icon} {tab.label}
+              </a>
+            );
+          }
+          return (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+              className={`text-left px-3 py-2 rounded mb-1 ${
+                activeTab === tab.id
+                  ? 'bg-teal-600 text-white'
+                  : 'text-slate-300 hover:bg-slate-700'
+              }`}>
+              {tab.icon} {tab.label}
+            </button>
+          );
+        })}
 
         <div className="flex-1" />
         {dataSource === 'fusion' && (
@@ -258,8 +275,6 @@ export default function DashboardPage() {
             📡 Agent data
           </div>
         )}
-        <a href="/settings" className="text-slate-400 hover:text-white px-3 py-2 text-sm">⚙️ Settings</a>
-        <a href="/csv-import" className="text-slate-400 hover:text-white px-3 py-2 text-sm">📁 CSV Import</a>
         <button onClick={() => { localStorage.clear(); window.location.href = '/login'; }}
           className="text-slate-400 hover:text-red-400 px-3 py-2 text-sm text-left">🚪 Sign Out</button>
       </nav>

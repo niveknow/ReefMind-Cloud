@@ -12,16 +12,20 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 from app.database import engine
 from app.config import get_settings
-from app.services.influx import write_telemetry, write_outlets
+from app.services.influx import write_telemetry, write_outlets, write_water_tests, write_notes
 from app.services.fusion_live import FusionLiveClient, FusionLiveError
 
 log = logging.getLogger("reefmind.collector")
 
 POLL_INTERVAL_SECONDS = 300  # 5 minutes
+MLOG_POLL_INTERVAL_SECONDS = 21600  # 6 hours
+NOTES_POLL_INTERVAL_SECONDS = 21600  # 6 hours
 BACKFILL_DAYS = 7  # Days of ilog history to write on first run
 
 # Track last poll per tenant for dedup
 _last_poll: dict[str, datetime] = {}
+_last_mlog_poll: dict[str, datetime] = {}
+_last_notes_poll: dict[str, datetime] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +154,77 @@ def _collect_tenant(tcfg: dict) -> dict:
     except (FusionLiveError, Exception) as e:
         result["status"] = f"error: {e}"
         log.error("Tenant %s collection failed: %s", tenant_id[:8], e)
+        client.close()
+
+    return result
+
+
+def _collect_mlog(tcfg: dict) -> dict:
+    """Fetch water test results (mlog) from Fusion for one tenant.
+    
+    tcfg: dict with keys: tenant_id, fusion_user, fusion_pass, fusion_apex_id
+    Returns a dict with counts of what was written.
+    """
+    tenant_id = tcfg["tenant_id"]
+    result = {"records": 0, "status": "ok"}
+
+    if not tcfg.get("fusion_user") or not tcfg.get("fusion_pass") or not tcfg.get("fusion_apex_id"):
+        result["status"] = "skipped (no fusion config)"
+        return result
+
+    try:
+        client = FusionLiveClient(tcfg["fusion_user"], tcfg["fusion_pass"])
+        client.login()
+        apex_id = tcfg["fusion_apex_id"]
+
+        data = client.get_mlog(apex_id, days=365)
+        if data:
+            count = write_water_tests(tenant_id, data)
+            result["records"] = count
+            log.info("Tenant %s: wrote %d water test records", tenant_id[:8], count)
+        else:
+            log.info("Tenant %s: no mlog data returned", tenant_id[:8])
+
+        client.close()
+    except (FusionLiveError, Exception) as e:
+        result["status"] = f"error: {e}"
+        log.error("Tenant %s mlog collection failed: %s", tenant_id[:8], e)
+
+    return result
+
+
+def _collect_notes(tcfg: dict) -> dict:
+    """Fetch tank notes from Fusion for one tenant.
+    
+    tcfg: dict with keys: tenant_id, fusion_user, fusion_pass, fusion_apex_id
+    Returns a dict with counts of what was written.
+    """
+    tenant_id = tcfg["tenant_id"]
+    result = {"records": 0, "status": "ok"}
+
+    if not tcfg.get("fusion_user") or not tcfg.get("fusion_pass") or not tcfg.get("fusion_apex_id"):
+        result["status"] = "skipped (no fusion config)"
+        return result
+
+    try:
+        client = FusionLiveClient(tcfg["fusion_user"], tcfg["fusion_pass"])
+        client.login()
+        apex_id = tcfg["fusion_apex_id"]
+
+        notes_result = client.get_notes(apex_id, page=1, per_page=200)
+        notes_list = notes_result[1] if isinstance(notes_result, list) and len(notes_result) > 1 else []
+
+        if notes_list:
+            count = write_notes(tenant_id, notes_list)
+            result["records"] = count
+            log.info("Tenant %s: wrote %d tank notes", tenant_id[:8], count)
+        else:
+            log.info("Tenant %s: no notes data returned", tenant_id[:8])
+
+        client.close()
+    except (FusionLiveError, Exception) as e:
+        result["status"] = f"error: {e}"
+        log.error("Tenant %s notes collection failed: %s", tenant_id[:8], e)
 
     return result
 
@@ -207,6 +282,31 @@ async def collector_loop():
                         pass  # Normal for unconfigured tenants
                     else:
                         log.warning("Tenant %s: %s", tid, result["status"])
+
+                    # ── Mlog (water tests) — every 6 hours ──────────────
+                    now = datetime.now(timezone.utc)
+                    last_mlog = _last_mlog_poll.get(tcfg["tenant_id"])
+                    if not last_mlog or (now - last_mlog).total_seconds() >= MLOG_POLL_INTERVAL_SECONDS:
+                        mlog_result = _collect_mlog(tcfg)
+                        if mlog_result["status"] == "ok":
+                            _last_mlog_poll[tcfg["tenant_id"]] = now
+                            log.info("Tenant %s: water tests collection done (%d records)",
+                                     tid, mlog_result["records"])
+                        elif "error" in mlog_result["status"]:
+                            log.warning("Tenant %s: water tests failed: %s",
+                                        tid, mlog_result["status"])
+
+                    # ── Notes — every 6 hours ───────────────────────────
+                    last_notes = _last_notes_poll.get(tcfg["tenant_id"])
+                    if not last_notes or (now - last_notes).total_seconds() >= NOTES_POLL_INTERVAL_SECONDS:
+                        notes_result = _collect_notes(tcfg)
+                        if notes_result["status"] == "ok":
+                            _last_notes_poll[tcfg["tenant_id"]] = now
+                            log.info("Tenant %s: notes collection done (%d records)",
+                                     tid, notes_result["records"])
+                        elif "error" in notes_result["status"]:
+                            log.warning("Tenant %s: notes failed: %s",
+                                        tid, notes_result["status"])
 
                 log.info("Collection cycle complete — next poll in %ds", POLL_INTERVAL_SECONDS)
 

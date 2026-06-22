@@ -141,23 +141,136 @@ def query_outlets(tenant_id: str) -> list:
     print(f"DEBUG query_outlets: returning {len(results)} outlets")
     return results
 
+# Water tests
+MLOG_TYPE_MAP = {1: "KH", 2: "Ca", 4: "Mg", 5: "NO3", 6: "PO4"}
+MLOG_UNITS = {"KH": "dkh", "Ca": "ppm", "Mg": "ppm", "NO3": "ppm", "PO4": "ppm"}
 
-def query_noaa_buoy(tenant_id: str, duration: str = "24h") -> list:
-    """Query NOAA buoy readings from tenant's InfluxDB bucket."""
-    bucket = f"reefmind_{tenant_id}"
+def write_water_tests(tenant_id: str, readings: list[dict], bucket_name: str = "") -> int:
+    """Write water test results to InfluxDB as apex_water_tests measurement.
+    Performs atomic replace: deletes existing apex_water_tests measurement first.
+    """
+    bucket = bucket_name or ensure_tenant_bucket(tenant_id)
+    client = get_influx_client()
+    
+    # Atomic replace
+    delete_api = client.delete_api()
+    delete_api.delete(start="1970-01-01T00:00:00Z", stop="2100-01-01T00:00:00Z", 
+                      predicate='_measurement="apex_water_tests"', bucket=bucket, org=settings.influx_org)
+    
+    write_api = client.write_api(write_type=SYNCHRONOUS)
+    points = []
+    for r in readings:
+        m_type = r.get("type")
+        param = MLOG_TYPE_MAP.get(m_type, "Unknown")
+        unit = MLOG_UNITS.get(param, "unknown")
+        
+        point = Point("apex_water_tests") \
+            .tag("tenant_id", tenant_id) \
+            .tag("parameter", param) \
+            .tag("unit", unit) \
+            .field("value", float(r.get("value", 0)))
+        
+        if r.get("date"):
+            # Assuming date format is compatible with InfluxDB or ISO
+            point.time(r["date"])
+        points.append(point)
+    
+    if points:
+        write_api.write(bucket=bucket, record=points)
+    return len(points)
+
+def query_water_tests(tenant_id: str, parameter: str = "", duration: str = "365d") -> list:
+    bucket = ensure_tenant_bucket(tenant_id)
     client = get_influx_client()
     query_api = client.query_api()
-
+    
+    param_filter = f'|> filter(fn: (r) => r["parameter"] == "{parameter}")' if parameter else ""
+    
     query = f"""
     from(bucket: "{bucket}")
       |> range(start: -{duration})
-      |> filter(fn: (r) => r["_measurement"] == "noaa_buoy")
-      |> yield(name: "mean")
+      |> filter(fn: (r) => r["_measurement"] == "apex_water_tests")
+      {param_filter}
+      |> yield(name: "water_tests")
     """
-
+    
     tables = query_api.query(query)
     results = []
     for table in tables:
         for record in table.records:
-            results.append(record)
+            results.append({
+                "time": record.get_time().isoformat() if hasattr(record, "get_time") else str(record["_time"]),
+                "parameter": record.values.get("parameter", ""),
+                "value": record.get_value(),
+                "unit": record.values.get("unit", ""),
+            })
+    return results
+
+# Notes
+NOTE_TYPES = {0: "Basic", 1: "Good", 2: "Bad", 3: "Ugly", 4: "Maintenance", 5: "Event"}
+
+def write_notes(tenant_id: str, notes: list[dict], bucket_name: str = "") -> int:
+    """Write tank notes to InfluxDB as apex_logs measurement.
+    Performs atomic replace: deletes existing apex_logs measurement first.
+    """
+    bucket = bucket_name or ensure_tenant_bucket(tenant_id)
+    client = get_influx_client()
+    
+    # Atomic replace
+    delete_api = client.delete_api()
+    delete_api.delete(start="1970-01-01T00:00:00Z", stop="2100-01-01T00:00:00Z", 
+                      predicate='_measurement="apex_logs"', bucket=bucket, org=settings.influx_org)
+    
+    write_api = client.write_api(write_type=SYNCHRONOUS)
+    points = []
+    for n in notes:
+        n_type = n.get("type", 0)
+        n_type_name = NOTE_TYPES.get(n_type, "Basic")
+        
+        point = Point("apex_logs") \
+            .tag("tenant_id", tenant_id) \
+            .tag("note_id", str(n.get("id", ""))) \
+            .tag("type_code", str(n_type)) \
+            .tag("type_name", n_type_name) \
+            .tag("title", n.get("title", "")) \
+            .tag("reason_code", str(n.get("reason", 0))) \
+            .tag("has_comment", "true" if n.get("text") else "false") \
+            .field("value", 1.0) \
+            .field("comment", n.get("text", ""))
+        
+        if n.get("date"):
+            point.time(n["date"])
+        points.append(point)
+    
+    if points:
+        write_api.write(bucket=bucket, record=points)
+    return len(points)
+
+def query_notes(tenant_id: str, duration: str = "365d", limit: int = 100) -> list:
+    bucket = ensure_tenant_bucket(tenant_id)
+    client = get_influx_client()
+    query_api = client.query_api()
+    
+    query = f"""
+    from(bucket: "{bucket}")
+      |> range(start: -{duration})
+      |> filter(fn: (r) => r["_measurement"] == "apex_logs")
+      |> limit(n: {limit})
+      |> yield(name: "notes")
+    """
+    
+    tables = query_api.query(query)
+    results = []
+    for table in tables:
+        for record in table.records:
+            results.append({
+                "time": record.get_time().isoformat() if hasattr(record, "get_time") else str(record["_time"]),
+                "note_id": record.values.get("note_id", ""),
+                "type_code": record.values.get("type_code", ""),
+                "type_name": record.values.get("type_name", ""),
+                "title": record.values.get("title", ""),
+                "reason_code": record.values.get("reason_code", ""),
+                "has_comment": record.values.get("has_comment", "false") == "true",
+                "comment": record.values.get("comment", ""),
+            })
     return results

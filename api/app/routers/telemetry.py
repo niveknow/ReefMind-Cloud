@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.middleware.auth import get_current_user
-from app.services.influx import query_telemetry, query_outlets
+from app.services.influx import query_telemetry, query_outlets, query_water_tests, query_notes
 
 router = APIRouter(prefix="/api/telemetry", tags=["telemetry"])
 
@@ -47,5 +47,33 @@ async def get_probe_data(
 
     results = query_telemetry(tenant_id, probe_name=probe_name, duration=duration)
     return {"probe": probe_name, "data": results}
+
+
+@router.get("/water-tests")
+async def get_water_tests(user: dict = Depends(get_current_user)):
+    """Get all water test results for this tenant.
+    
+    Returns water test readings (KH, Ca, Mg, NO3, PO4) grouped by parameter.
+    """
+    tenant_id = user.get("tenant_id", "")
+    if not tenant_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    results = query_water_tests(tenant_id)
+    return {"water_tests": results}
+
+
+@router.get("/notes")
+async def get_notes(user: dict = Depends(get_current_user)):
+    """Get tank notes for this tenant.
+    
+    Returns tank notes (observations, maintenance, events) ordered by most recent.
+    """
+    tenant_id = user.get("tenant_id", "")
+    if not tenant_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    results = query_notes(tenant_id)
+    return {"notes": results}
 
 

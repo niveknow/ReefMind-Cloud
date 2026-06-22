@@ -244,6 +244,28 @@ class FusionLiveClient:
             })
         return outlets
 
+    def get_mlog(self, apex_id: str, days: int = 365) -> list[dict]:
+        """Fetch water test results from Fusion mlog API.
+        
+        Returns: list of {type, value, date}
+        """
+        resp = self._get(f"/api/apex/{apex_id}/mlog?days={days}")
+        return resp.json()
+
+    def get_notes(self, apex_id: str, date_str: str = "",
+                  page: int = 1, per_page: int = 200) -> list:
+        """Fetch tank notes from Fusion notes API.
+        
+        Returns: [metadata, notes_list]
+        """
+        import time
+        ts = int(time.time() * 1000)
+        url = f"/api/apex/{apex_id}/notes?page={page}&per_page={per_page}&_={ts}"
+        if date_str:
+            url += f"&date={date_str}"
+        resp = self._get(url)
+        return resp.json()
+
     def close(self):
         self._session.close()
 
