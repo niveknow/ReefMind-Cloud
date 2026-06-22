@@ -701,6 +701,141 @@ v0.1.0 — Initial Build (commit b541f3e)
 
 ---
 
+### TEST-046 — Water tests endpoint returns data
+
+- **Requirement reference:** `api/app/routers/telemetry.py` — `GET /api/telemetry/water-tests`
+- **User role:** Authenticated (JWT)
+- **Preconditions:** Mlog data has been synced into InfluxDB for this tenant (via background collector or immediate sync on Fusion save)
+- **Steps:**
+  1. Get valid JWT via login
+  2. Send `GET /api/telemetry/water-tests` with Bearer token
+- **Expected result:** HTTP 200 with `{"water_tests": [...]}`. Each entry has `parameter`, `value`, `unit`, `time` fields. Parameters include KH, Ca, Mg, NO3, PO4.
+- **Status:** [PENDING]
+- **Evidence:**
+- **Notes:** Requires Fusion credentials configured and mlog data synced
+
+---
+
+### TEST-047 — Water tests — empty data when no Fusion configured
+
+- **Requirement reference:** `api/app/routers/telemetry.py`
+- **User role:** Authenticated (JWT)
+- **Preconditions:** Tenant has no Fusion credentials configured
+- **Steps:**
+  1. Register fresh tenant with no Fusion config
+  2. Login and send `GET /api/telemetry/water-tests`
+- **Expected result:** HTTP 200 with `{"water_tests": []}` — empty array, not an error
+- **Status:** [PENDING]
+- **Evidence:**
+- **Notes:**
+
+---
+
+### TEST-048 — Notes endpoint returns data
+
+- **Requirement reference:** `api/app/routers/telemetry.py` — `GET /api/telemetry/notes`
+- **User role:** Authenticated (JWT)
+- **Preconditions:** Notes data has been synced into InfluxDB
+- **Steps:**
+  1. Login and send `GET /api/telemetry/notes`
+- **Expected result:** HTTP 200 with `{"notes": [...]}`. Each entry has `note_id`, `type_name`, `title`, `comment`, `time`. Type names include Good, Bad, Ugly, Maintenance, Event, Basic.
+- **Status:** [PENDING]
+- **Evidence:**
+- **Notes:**
+
+---
+
+### TEST-049 — Notes — empty data when no Fusion configured
+
+- **Requirement reference:** `api/app/routers/telemetry.py`
+- **User role:** Authenticated (JWT)
+- **Preconditions:** Tenant has no Fusion credentials configured
+- **Steps:**
+  1. Register fresh tenant
+  2. Login and send `GET /api/telemetry/notes`
+- **Expected result:** HTTP 200 with `{"notes": []}` — empty array
+- **Status:** [PENDING]
+- **Evidence:**
+- **Notes:**
+
+---
+
+### TEST-050 — Fusion save triggers immediate water tests and notes sync
+
+- **Requirement reference:** `api/app/routers/fusion.py` — save endpoint + collector
+- **User role:** Authenticated (JWT)
+- **Preconditions:** Valid Fusion credentials, controller discovered
+- **Steps:**
+  1. Discover Fusion controller via `POST /api/fusion/discover`
+  2. Save config via `POST /api/fusion/save` with controller_id and discovered_data
+  3. Immediately call `GET /api/telemetry/water-tests` and `GET /api/telemetry/notes`
+- **Expected result:** Both endpoints return data from Fusion within seconds of saving. No need to wait 6 hours for background collector.
+- **Status:** [PENDING]
+- **Evidence:**
+- **Notes:** Tests the immediate sync trigger added in commit c5097cb. Requires valid Fusion credentials.
+
+---
+
+### TEST-051 — Water tests page renders in web UI
+
+- **Requirement reference:** `web/src/pages/WaterTestPage.tsx`
+- **User role:** Authenticated
+- **Preconditions:** Web app running, user logged in, water test data available
+- **Steps:**
+  1. Login via web UI
+  2. Click "Water Tests" in sidebar or navigate to `/water-tests`
+- **Expected result:** Page renders with parameter cards for KH, Ca, Mg, NO3, PO4. Each card shows latest value prominently and a history table.
+- **Status:** [PENDING]
+- **Evidence:**
+- **Notes:** Requires browser
+
+---
+
+### TEST-052 — Notes page renders in web UI
+
+- **Requirement reference:** `web/src/pages/NotesPage.tsx`
+- **User role:** Authenticated
+- **Preconditions:** Web app running, user logged in, notes data available
+- **Steps:**
+  1. Login via web UI
+  2. Click "Tank Notes" in sidebar or navigate to `/notes`
+- **Expected result:** Page renders with chronological notes timeline. Each note has color-coded type badge (Good=green, Bad=red, etc.), title, comment, and date.
+- **Status:** [PENDING]
+- **Evidence:**
+- **Notes:** Requires browser
+
+---
+
+### TEST-053 — Water tests page shows empty state when no data
+
+- **Requirement reference:** `web/src/pages/WaterTestPage.tsx`
+- **User role:** Authenticated
+- **Preconditions:** No water test data exists for tenant
+- **Steps:**
+  1. Login as tenant with no Fusion data
+  2. Navigate to `/water-tests`
+- **Expected result:** Page renders with a "No water test data available" message and guidance about configuring Fusion
+- **Status:** [PENDING]
+- **Evidence:**
+- **Notes:**
+
+---
+
+### TEST-054 — Notes page shows empty state when no data
+
+- **Requirement reference:** `web/src/pages/NotesPage.tsx`
+- **User role:** Authenticated
+- **Preconditions:** No notes data exists for tenant
+- **Steps:**
+  1. Login as tenant with no Fusion data
+  2. Navigate to `/notes`
+- **Expected result:** Page renders with a "No tank notes available" message and guidance
+- **Status:** [PENDING]
+- **Evidence:**
+- **Notes:**
+
+---
+
 ## Test Status Rules
 
 - [PENDING]: Test has not been run.
