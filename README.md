@@ -195,9 +195,18 @@ ReefMind-Cloud/
 ### Fusion
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/fusion/discover` | Discover Apex controllers from Fusion creds |
-| GET | `/api/fusion/live/{probe}` | Live Fusion probe data |
-| GET | `/api/fusion/outlets` | Live Fusion outlet states |
+| POST | `/api/fusion/discover` | Discover Apex controllers from Fusion credentials |
+| POST | `/api/fusion/save` | Save discovered Fusion config to tenant settings |
+| GET | `/api/fusion/status` | Check Fusion connection status |
+| GET | `/api/fusion/readings` | Live probe readings from Fusion |
+| GET | `/api/fusion/history/{probe_did}` | Probe history from Fusion ilog |
+| GET | `/api/fusion/outlets` | Live outlet states from Fusion |
+
+### Nemo AI
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/nemo/status` | Check Nemo AI configuration status |
+| POST | `/api/nemo/ask` | Ask the reef-keeping AI assistant |
 
 ---
 
@@ -214,15 +223,17 @@ This project was designed by **Archie** (SaaS Architect) and built by **Cody** (
 
 ## Design Decisions (from Archie's Review)
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Agent model | On-prem agent pushes to cloud | Apex controller has no public IP |
-| Tenant isolation | Per-tenant InfluxDB buckets | Native isolation, clean separation |
-| Dashboard | Custom React + ECharts | Multi-tenant from day 1, full control |
-| Auth | JWT + per-tenant API key | Simple, no external dependencies |
-| Nemo role | General reef advisor (MVP) | Per-tank personalization = future tier |
-| Deployment | Same Docker Compose for local + VPS | Zero rework when moving to cloud |
-| Async | ARQ (Redis-backed) | Lighter than Celery |
+| Decision | Choice | Status | Rationale |
+|----------|--------|--------|-----------|
+| Data collection | Server-side Fusion API polling (no agent required) | **Implemented** | Fusion API provides same data as local Apex controller; no on-prem agent needed for MVP |
+| Tenant isolation | Per-tenant InfluxDB buckets | **Implemented** | Native isolation, clean separation |
+| Dashboard | Custom React + ECharts | **Implemented** | Multi-tenant from day 1, full control |
+| Auth | JWT + per-tenant API key | **Implemented** | Simple, no external dependencies |
+| Nemo role | General reef advisor (MVP) | **Implemented** | Per-tank personalization = future tier |
+| Deployment | Same Docker Compose for local + VPS | **Deferred** | Env var switch ready; VPS deployment planned after MVP validation |
+| Background workers | ARQ (Redis-backed) | **Deferred — uses inline asyncio for now** | Fusion collector runs in API lifespan; CSV processing is synchronous |
+| On-prem agent | Separate Docker container for user networks | **Future** | Planned for remote Apex controllers behind NAT |
+| Grafana dashboards | Community JSON import/export | **Changed — custom data flows instead** | Custom integration suits SaaS better than Grafana-derived flows |
 
 ---
 

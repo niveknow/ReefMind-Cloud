@@ -3,6 +3,27 @@
 > **Target:** Cody (Developer Agent)
 > **Source:** Archie (SaaS Architect)
 > **Goal:** Turn ReefMind from a local single-tenant Docker app into a multi-tenant cloud SaaS
+> **Status:** Historical build plan — see **Delta Notes** below
+
+---
+
+## Delta Notes (v0.1.0 Implementation)
+
+This plan was the build specification. The following deltas reflect decisions made during implementation:
+
+| Plan Item | Built Status | Notes |
+|-----------|-------------|-------|
+| Phase 0: Backend scaffold | ✅ **Built** — Simplified to `api/app/` layout | See `docs/saas-project-structure.md` |
+| Phase 0: Database models | ✅ **Built** — 3 models (User, Tenant+TenantConfig, CsvImport) | No migrations yet — uses `create_all` |
+| Phase 0: Auth | ✅ **Built** — JWT (HS256) + API key bearer | Auth middleware at `middleware/auth.py` |
+| Phase 1: Ingest API | ✅ **Built** — `/api/ingest/telemetry`, `/outlets`, `/power` | Agent API key auth |
+| Phase 1: Telemetry API | ✅ **Built** — `/api/telemetry/summary`, `/outlets`, `/{probe}` | JWT auth |
+| ARQ worker queue | 🔄 **Deferred** — Synchronous/async inline | Fusion collector runs in API lifespan |
+| Separate agent container | 🔄 **Deferred** — Server-side Fusion collection | See `services/collector.py` + `fusion_live.py` |
+| Fusion live data API | ⭐ **Added (not in original plan)** | `/api/fusion/*` — discovery, readings, history, outlets |
+| Nemo AI | ⭐ **Enhanced beyond plan** — Relevance detection, Fusion context, caching, multi-provider | `/api/nemo/ask` + `/api/nemo/status` |
+| Alembic migrations | ❌ **Not yet** | Schema created via `Base.metadata.create_all` |
+| Test suite | ❌ **Not yet** | Pending — Trixie will create test plans
 
 ---
 

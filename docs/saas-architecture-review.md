@@ -1,9 +1,25 @@
 # ReefMind SaaS — Architecture Review & Design
 
-> **Author:** Archie (SaaS Architect)
-> **Date:** 2026-06-21
-> **Status:** v2 — Revised after Kevin's decisions (Local-first, Dashboard scope, Nemo role)
+> **Version:** v2 — Revised after Kevin's decisions (Local-first, Dashboard scope, Nemo role)
+> **Status:** Historical design reference — see **Delta Notes** below
 > **Assumptions documented:** See Sections 9 & 11
+
+---
+
+## Delta Notes (v0.1.0 Implementation)
+
+This document represents the *design intent* authored before implementation. The following implementation deltas were identified during initial testing:
+
+| Design (this doc) | Implementation | Notes |
+|---|---|---|
+| `backend/app/db/models/` | `api/app/models/` | Flattened structure |
+| Local agent collector pushes to cloud | Server-side Fusion poller in API lifespan | See `api/app/services/collector.py` + `fusion_live.py` |
+| ARQ Redis-backed workers | Inline asyncio tasks + sync CSV | ARQ deferred to future |
+| Grafana-compatible dashboards | Custom React + ECharts | Implemented |
+| Fusion API not in initial scope | Full Fusion endpoints: discover, save, readings, history, outlets | Added during build |
+| Basic Nemo | Enhanced: relevance detection, Fusion context, 60s cache, multi-provider | Implemented |
+
+**For the definitive project structure and API layout, see:** `ARCHITECTURE.md`, `README.md`, `docs/saas-project-structure.md`
 
 ---
 
