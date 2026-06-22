@@ -120,7 +120,7 @@ ENABLE_SSL=true
 | **Phase 1** — Core Data APIs | ✅ **Built** | Full ingest (telemetry/outlets/power), telemetry queries, tenant config CRUD. Fusion live data endpoints added. Nemo AI with Fusion context integration. |
 | **Phase 2** — Async Workers (ARQ) | 🔄 **Deferred** | Fusion collector runs as inline asyncio task in API lifespan. CSV processing is synchronous. ARQ deferred until workload requires it. |
 | **Phase 3** — On-Prem Agent | 🔄 **Deferred** | No separate agent container. Server-side Fusion polling via `services/collector.py` + `services/fusion_live.py` covers the same data without user-deployed agent. |
-| **Testing** | ❌ **Not started** | Trixie's test plan created at `tests/uat/`. No automated test suite yet. |
+| **Phase 4** — Water Tests & Tank Notes | ✅ **Built** | Full integration: Fusion mlog/notes API, InfluxDB storage, API endpoints, frontend pages. Immediate sync on Fusion save config. Docs: `docs/water-tests-and-notes-design.md` |
 | **VPS Deployment** | ❌ **Not started** | Deferred until MVP is validated locally.
 
 **Goal:** Get the cloud backend project structure in place with database models, migrations, and the FastAPI skeleton running.
