@@ -103,6 +103,21 @@ async def fusion_save(
 
     await db.commit()
 
+    # Trigger immediate mlog and notes collection for this tenant
+    try:
+        from app.services.collector import _collect_mlog, _collect_notes
+        tcfg = {
+            "tenant_id": tenant_id,
+            "fusion_user": config.fusion_user,
+            "fusion_pass": config.fusion_pass,
+            "fusion_apex_id": req.controller_id,
+        }
+        mlog_result = _collect_mlog(tcfg)
+        notes_result = _collect_notes(tcfg)
+        print(f"Immediate sync: mlog={mlog_result['records']} records, notes={notes_result['records']} records")
+    except Exception as e:
+        print(f"Immediate sync error (non-fatal): {e}")
+
     return FusionSaveResponse(
         status="ok",
         message=f"Configuration saved for controller {req.controller_id}",
