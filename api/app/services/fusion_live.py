@@ -294,6 +294,18 @@ class FusionLiveClient:
     def close(self):
         self._session.close()
 
+    def get_controller_info(self, apex_id: str) -> dict:
+        """Fetch controller hardware, software, serial, timezone from Fusion."""
+        detail = self._get(f"/api/apex/{apex_id}").json()
+        ctrl = detail.get("controller", {}) or {}
+        return {
+            "hardware": ctrl.get("hardware", ""),
+            "software": ctrl.get("software", ""),
+            "serial": ctrl.get("serial", ""),
+            "timezone": ctrl.get("timezone", ""),
+            "name": ctrl.get("name", ""),
+        }
+
 
 # ------------------------------------------------------------------
 # High-level helpers (called by router)

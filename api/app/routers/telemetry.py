@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.middleware.auth import get_current_user
-from app.services.influx import query_telemetry, query_outlets, query_water_tests, query_notes
+from app.services.influx import query_telemetry, query_outlets, query_water_tests, query_notes, query_controller_info
 
 router = APIRouter(prefix="/api/telemetry", tags=["telemetry"])
 
@@ -75,5 +75,15 @@ async def get_notes(user: dict = Depends(get_current_user)):
 
     results = query_notes(tenant_id)
     return {"notes": results}
+
+
+@router.get("/controller")
+async def get_controller_info(user: dict = Depends(get_current_user)):
+    """Get controller hardware/software/serial info."""
+    tenant_id = user.get("tenant_id", "")
+    if not tenant_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    info = query_controller_info(tenant_id)
+    return {"controller": info}
 
 

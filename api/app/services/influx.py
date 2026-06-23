@@ -77,6 +77,8 @@ def write_outlets(tenant_id: str, outlets: list[dict], apex_id: str = "") -> int
             .tag("apex_id", apex_id)
             .tag("outlet_name", o["outlet_name"])
             .tag("outlet_type", o.get("outlet_type", ""))
+            .tag("device_id", o.get("device_id", ""))
+            .tag("device_group", o.get("device_group", ""))
             .field("state", int(o["state"]))
             .field("state_display", str(o["state_display"]))
         )
@@ -175,6 +177,8 @@ def query_outlets(tenant_id: str) -> list:
             results.append({
                 "outlet_name": record.values.get("outlet_name", ""),
                 "outlet_type": record.values.get("outlet_type", ""),
+                "device_id": record.values.get("device_id", ""),
+                "device_group": record.values.get("device_group", ""),
                 "state": int(record.get_value()),
                 "state_display": "ON" if int(record.get_value()) == 1 else "OFF",
             })
@@ -344,3 +348,63 @@ def query_notes(tenant_id: str, duration: str = "365d", limit: int = 100) -> lis
 
     sorted_notes = sorted(notes_map.values(), key=lambda n: n.get("time", ""), reverse=True)
     return sorted_notes[:limit]
+
+
+def write_controller_info(tenant_id: str, info: dict, apex_id: str = "") -> int:
+    """Write controller hardware/software/serial/timezone to apex_controller_info.
+    Atomic replace — only one record per tenant needed.
+    """
+    bucket = ensure_tenant_bucket(tenant_id)
+    client = get_influx_client()
+
+    try:
+        delete_api = client.delete_api()
+        delete_api.delete(start="1970-01-01T00:00:00Z", stop="2100-01-01T00:00:00Z",
+                          predicate='_measurement="apex_controller_info"', bucket=bucket, org=settings.influx_org)
+    except Exception as e:
+        log.error("write_controller_info: delete failed for tenant %s: %s", tenant_id[:8], e)
+
+    write_api = client.write_api(write_type=SYNCHRONOUS)
+    point = (
+        Point("apex_controller_info")
+        .tag("tenant_id", tenant_id)
+        .tag("apex_id", apex_id)
+        .tag("serial", info.get("serial", ""))
+        .field("hardware", info.get("hardware", ""))
+        .field("software", info.get("software", ""))
+        .field("timezone", info.get("timezone", ""))
+        .field("name", info.get("name", ""))
+    )
+    try:
+        write_api.write(bucket=bucket, record=point)
+    except Exception as e:
+        log.error("write_controller_info failed for tenant %s: %s", tenant_id[:8], e)
+        return 0
+    return 1
+
+
+def query_controller_info(tenant_id: str) -> dict:
+    """Get the latest controller info for a tenant."""
+    bucket = ensure_tenant_bucket(tenant_id)
+    client = get_influx_client()
+    query_api = client.query_api()
+
+    query = f"""\
+    from(bucket: "{bucket}")
+      |> range(start: -365d)
+      |> filter(fn: (r) => r["_measurement"] == "apex_controller_info")
+      |> last()
+    """
+
+    tables = query_api.query(query)
+    info = {}
+    for table in tables:
+        for record in table.records:
+            field = record.get_field()
+            if field:
+                info[field] = record.get_value()
+            if "serial" in record.values:
+                info.setdefault("serial", record.values["serial"])
+            if "apex_id" in record.values:
+                info.setdefault("apex_id", record.values["apex_id"])
+    return info

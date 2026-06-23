@@ -55,10 +55,13 @@ export default function SettingsPage() {
   const [nemoModel, setNemoModel] = useState('deepseek-chat');
   const [savingNemo, setSavingNemo] = useState(false);
   const [nemoSaved, setNemoSaved] = useState(false);
+  // Controller info
+  const [ctrlInfo, setCtrlInfo] = useState<any>(null);
 
   useEffect(() => {
     loadStatus();
     loadConfig();
+    loadControllerInfo();
   }, []);
 
   const loadStatus = async () => {
@@ -79,6 +82,14 @@ export default function SettingsPage() {
       if (c.nemo_configured) {
         setNemoApiKey('********'); // masked — key never sent to frontend
       }
+    } catch { /* ignore */ }
+  };
+
+  const loadControllerInfo = async () => {
+    try {
+      const res = await api.get('/api/telemetry/controller');
+      const c = res.data.controller || {};
+      if (c.serial) setCtrlInfo(c);
     } catch { /* ignore */ }
   };
 
@@ -235,6 +246,34 @@ export default function SettingsPage() {
             <span className="text-green-400 text-sm ml-3">✅ Saved!</span>
           )}
         </div>
+
+        {/* Controller Info */}
+        {ctrlInfo && (
+          <div className="bg-slate-800 rounded-lg p-6 mb-6">
+            <h2 className="text-lg font-semibold text-white mb-2">🖥️ Controller Info</h2>
+            <p className="text-slate-400 text-sm mb-4">
+              Hardware and firmware details for your Apex controller.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-slate-700/50 rounded-lg p-3">
+                <span className="text-xs text-slate-400 block">Hardware</span>
+                <span className="text-white font-mono text-sm">{ctrlInfo.hardware || '—'}</span>
+              </div>
+              <div className="bg-slate-700/50 rounded-lg p-3">
+                <span className="text-xs text-slate-400 block">Firmware</span>
+                <span className="text-white font-mono text-sm">{ctrlInfo.software || '—'}</span>
+              </div>
+              <div className="bg-slate-700/50 rounded-lg p-3">
+                <span className="text-xs text-slate-400 block">Serial</span>
+                <span className="text-white font-mono text-sm">{ctrlInfo.serial || '—'}</span>
+              </div>
+              <div className="bg-slate-700/50 rounded-lg p-3">
+                <span className="text-xs text-slate-400 block">Timezone</span>
+                <span className="text-white font-mono text-sm">{ctrlInfo.timezone || '—'}</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* AI Assistant */}
         <div className="bg-slate-800 rounded-lg p-6 mb-6">

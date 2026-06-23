@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 from app.database import engine
 from app.config import get_settings
-from app.services.influx import write_telemetry, write_outlets, write_water_tests, write_notes, write_power
+from app.services.influx import write_telemetry, write_outlets, write_water_tests, write_notes, write_power, write_controller_info
 from app.services.fusion_live import FusionLiveClient, FusionLiveError
 
 log = logging.getLogger("reefmind.collector")
@@ -26,6 +26,30 @@ ALL_AREAS = ["probes", "outlets", "water_tests", "notes", "power", "trident"]
 
 # Track last poll per tenant for dedup
 _last_poll: dict[str, datetime] = {}
+
+# DID prefix → device group mapping (from local collector conventions)
+DEVICE_GROUPS: dict[str, str] = {
+    "1_": "Alarm",
+    "2_": "EB832_1",
+    "3_": "Vortech",
+    "4_": "EB8_4",
+    "5_": "EB832_2",
+    "7_": "Feeder",
+    "base_": "Base",
+    "Cntl_": "Virtual",
+}
+
+
+def _get_device_group(did: str) -> tuple[str, str]:
+    """Parse a DID string into (device_id, device_group).
+    
+    Example DIDs: '2_6' → ('6', 'EB832_1'), 'base_Temp' → ('', 'Base')
+    """
+    for prefix, group in DEVICE_GROUPS.items():
+        if did.startswith(prefix):
+            suffix = did[len(prefix):]
+            return suffix, group
+    return did, ""
 
 
 # ---------------------------------------------------------------------------
@@ -167,9 +191,12 @@ def _collect_tenant(tcfg: dict) -> dict:
                 state_arr = status_outputs_map.get(out.get("did", ""), [])
                 state_str = state_arr[0] if isinstance(state_arr, list) and len(state_arr) > 0 else "OFF"
                 is_on = int(state_str in ("ON", "AON", "PF1", "PF2", "PF3", "PF4"))
+                device_id, device_group = _get_device_group(out.get("did", ""))
                 outlet_points.append({
                     "outlet_name": out.get("name", ""),
                     "outlet_type": out.get("type", ""),
+                    "device_id": device_id,
+                    "device_group": device_group,
                     "state": is_on,
                     "state_display": state_str,
                     "timestamp": now,
@@ -252,6 +279,85 @@ def _collect_tenant(tcfg: dict) -> dict:
                     log.info("Tenant %s: no notes returned", tenant_id[:8])
             except Exception as e:
                 log.warning("Tenant %s: notes fetch failed: %s", tenant_id[:8], e)
+
+        # --- 6. Historical backfill (first poll only) ---
+        if "probes" in enabled:
+            backfill_done = False
+            try:
+                meta = json.loads(config_json_raw) if isinstance(config_json_raw, str) else {}
+                backfill_done = meta.get("backfill_complete", False)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+            if not backfill_done:
+                log.info("Tenant %s: running historical backfill (ilog, %d days)...", tenant_id[:8], BACKFILL_DAYS)
+                backfill_probe_dids = [inp.get("did", "") for inp in config_inputs
+                                      if inp.get("did", "").startswith(("base_", "Tmp", "pH", "ORP", "Sal"))]
+                backfill_points = []
+                for probe_did in backfill_probe_dids:
+                    try:
+                        ilog = client._get(f"/api/apex/{apex_id}/ilog?days={BACKFILL_DAYS}").json()
+                        items = ilog if isinstance(ilog, list) else ilog.get("ilog", ilog.get("items", []))
+                        for item in items:
+                            entry_time = item.get("date", "")
+                            inputs = item.get("inputs", [])
+                            for inp in inputs:
+                                if inp.get("did") == probe_did:
+                                    cfg = config_map.get(probe_did, {})
+                                    ptype = cfg.get("type", "Unknown")
+                                    try:
+                                        val = float(inp.get("value", 0))
+                                    except (ValueError, TypeError):
+                                        continue
+                                    backfill_points.append({
+                                        "did": probe_did,
+                                        "probe_name": DISPLAY_NAMES.get(probe_did, cfg.get("name", probe_did)),
+                                        "probe_type": ptype,
+                                        "unit": PROBE_UNITS.get(ptype, "raw"),
+                                        "value": val,
+                                        "timestamp": entry_time,
+                                    })
+                                    break
+                    except Exception as e:
+                        log.warning("Tenant %s: ilog backfill failed for %s: %s", tenant_id[:8], probe_did, e)
+
+                if backfill_points:
+                    count = write_telemetry(tenant_id, backfill_points, apex_id=apex_id)
+                    log.info("Tenant %s: backfilled %d historical probe points", tenant_id[:8], count)
+
+                # Mark backfill as complete in config_json
+                try:
+                    import asyncio
+
+                    async def _mark_backfill():
+                        async with engine.begin() as conn:
+                            import uuid
+                            tid = uuid.UUID(tenant_id)
+                            await conn.execute(
+                                text("""UPDATE tenant_configs
+                                    SET config_json = jsonb_set(
+                                        COALESCE(config_json::jsonb, '{}'::jsonb),
+                                        '{backfill_complete}',
+                                        'true'::jsonb
+                                    )
+                                    WHERE tenant_id = :tid"""),
+                                {"tid": tid}
+                            )
+
+                    task = asyncio.create_task(_mark_backfill())
+                except Exception as e:
+                    log.warning("Tenant %s: failed to mark backfill complete: %s", tenant_id[:8], e)
+
+        # --- 7. Controller info ---
+        try:
+            ctrl_info = client.get_controller_info(apex_id)
+            if ctrl_info.get("serial"):
+                write_controller_info(tenant_id, ctrl_info, apex_id=apex_id)
+                result["controller_info"] = 1
+                log.info("Tenant %s: wrote controller info (HW: %s, SW: %s)",
+                         tenant_id[:8], ctrl_info.get("hardware", "?"), ctrl_info.get("software", "?"))
+        except Exception as e:
+            log.warning("Tenant %s: controller info fetch failed: %s", tenant_id[:8], e)
 
         client.close()
 
