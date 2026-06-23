@@ -1,8 +1,10 @@
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
 from app.config import get_settings
+import logging
 
 settings = get_settings()
+log = logging.getLogger(__name__)
 
 _client = None
 
@@ -118,9 +120,9 @@ def query_outlets(tenant_id: str) -> list:
     client = get_influx_client()
     query_api = client.query_api()
 
-    print(f"DEBUG query_outlets: tenant_id={tenant_id[:20]}, bucket={bucket}")
+    log.debug("query_outlets: tenant_id=%s, bucket=%s", tenant_id[:20], bucket)
 
-    query = f"""
+    query = f"""\
     from(bucket: "{bucket}")
       |> range(start: -30m)
       |> filter(fn: (r) => r["_measurement"] == "apex_outlet_states")
@@ -128,7 +130,7 @@ def query_outlets(tenant_id: str) -> list:
       |> last()
     """
 
-    print(f"DEBUG query_outlets: executing query for bucket={bucket}")
+    log.debug("query_outlets: executing query for bucket=%s", bucket)
     tables = query_api.query(query)
     results = []
     for table in tables:
@@ -138,7 +140,7 @@ def query_outlets(tenant_id: str) -> list:
                 "state": int(record.get_value()),
                 "state_display": "ON" if int(record.get_value()) == 1 else "OFF",
             })
-    print(f"DEBUG query_outlets: returning {len(results)} outlets")
+    log.debug("query_outlets: returning %d outlets", len(results))
     return results
 
 # Water tests

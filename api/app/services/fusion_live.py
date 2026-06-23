@@ -266,6 +266,31 @@ class FusionLiveClient:
         resp = self._get(url)
         return resp.json()
 
+    def get_all_notes(self, apex_id: str, days: int = 30) -> list[dict]:
+        """Fetch all notes from the last N days, handling pagination.
+        
+        per_page=100 per Fusion API limits (200 causes 400 Bad Request).
+        Returns: flat list of note dicts (merged from paginated responses).
+        """
+        from datetime import datetime, timedelta
+        page = 1
+        all_notes = []
+        target_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+        while True:
+            result = self.get_notes(apex_id, date_str=target_date,
+                                    page=page, per_page=100)
+            # Result is [metadata_dict, notes_array]
+            if not result or len(result) < 2:
+                break
+            notes = result[1] if isinstance(result[1], list) else []
+            if not notes:
+                break
+            all_notes.extend(notes)
+            if len(notes) < 100:
+                break  # last page
+            page += 1
+        return all_notes
+
     def close(self):
         self._session.close()
 
