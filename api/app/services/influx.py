@@ -35,51 +35,88 @@ def ensure_tenant_bucket(tenant_id: str) -> str:
     return bucket_name
 
 
-def write_telemetry(tenant_id: str, readings: list[dict]) -> int:
+def write_telemetry(tenant_id: str, readings: list[dict], apex_id: str = "") -> int:
     bucket = ensure_tenant_bucket(tenant_id)
     client = get_influx_client()
     write_api = client.write_api(write_type=SYNCHRONOUS)
 
     points = []
     for r in readings:
-        point = Point("apex_telemetry").tag("tenant_id", tenant_id).tag("probe_name", r["probe_name"]).tag("probe_type", r["probe_type"]).tag("unit", r["unit"]).tag("did", r.get("did", "")).field("value", float(r["value"]))
+        point = (
+            Point("apex_telemetry")
+            .tag("tenant_id", tenant_id)
+            .tag("apex_id", apex_id)
+            .tag("probe_name", r["probe_name"])
+            .tag("probe_type", r["probe_type"])
+            .tag("unit", r["unit"])
+            .tag("did", r.get("did", ""))
+            .field("value", float(r["value"]))
+        )
         if r.get("timestamp"):
             point.time(r["timestamp"])
         points.append(point)
 
-    write_api.write(bucket=bucket, record=points)
+    try:
+        write_api.write(bucket=bucket, record=points)
+    except Exception as e:
+        log.error("write_telemetry failed for tenant %s: %s", tenant_id[:8], e)
+        return 0
     return len(points)
 
 
-def write_outlets(tenant_id: str, outlets: list[dict]) -> int:
+def write_outlets(tenant_id: str, outlets: list[dict], apex_id: str = "") -> int:
     bucket = ensure_tenant_bucket(tenant_id)
     client = get_influx_client()
     write_api = client.write_api(write_type=SYNCHRONOUS)
 
     points = []
     for o in outlets:
-        point = Point("apex_outlet_states").tag("tenant_id", tenant_id).tag("outlet_name", o["outlet_name"]).field("state", int(o["state"])).field("state_display", str(o["state_display"]))
+        point = (
+            Point("apex_outlet_states")
+            .tag("tenant_id", tenant_id)
+            .tag("apex_id", apex_id)
+            .tag("outlet_name", o["outlet_name"])
+            .tag("outlet_type", o.get("outlet_type", ""))
+            .field("state", int(o["state"]))
+            .field("state_display", str(o["state_display"]))
+        )
         if o.get("timestamp"):
             point.time(o["timestamp"])
         points.append(point)
 
-    write_api.write(bucket=bucket, record=points)
+    try:
+        write_api.write(bucket=bucket, record=points)
+    except Exception as e:
+        log.error("write_outlets failed for tenant %s: %s", tenant_id[:8], e)
+        return 0
     return len(points)
 
 
-def write_power(tenant_id: str, readings: list[dict]) -> int:
+def write_power(tenant_id: str, readings: list[dict], apex_id: str = "") -> int:
     bucket = ensure_tenant_bucket(tenant_id)
     client = get_influx_client()
     write_api = client.write_api(write_type=SYNCHRONOUS)
 
     points = []
     for r in readings:
-        point = Point("apex_power").tag("tenant_id", tenant_id).tag("outlet_name", r["outlet_name"]).tag("channel", r.get("channel", "main")).field("watts", float(r["watts"])).field("amps", float(r.get("amps", 0)))
+        point = (
+            Point("apex_power")
+            .tag("tenant_id", tenant_id)
+            .tag("apex_id", apex_id)
+            .tag("outlet_name", r["outlet_name"])
+            .tag("channel", r.get("channel", "main"))
+            .field("watts", float(r["watts"]))
+            .field("amps", float(r.get("amps", 0)))
+        )
         if r.get("timestamp"):
             point.time(r["timestamp"])
         points.append(point)
 
-    write_api.write(bucket=bucket, record=points)
+    try:
+        write_api.write(bucket=bucket, record=points)
+    except Exception as e:
+        log.error("write_power failed for tenant %s: %s", tenant_id[:8], e)
+        return 0
     return len(points)
 
 
@@ -90,7 +127,7 @@ def query_telemetry(tenant_id: str, probe_name: str = "", duration: str = "24h")
 
     where_clause = f'|> filter(fn: (r) => r["probe_name"] == "{probe_name}")' if probe_name else ""
 
-    query = f"""
+    query = f"""\
     from(bucket: "{bucket}")
       |> range(start: -{duration})
       |> filter(fn: (r) => r["_measurement"] == "apex_telemetry")
@@ -137,6 +174,7 @@ def query_outlets(tenant_id: str) -> list:
         for record in table.records:
             results.append({
                 "outlet_name": record.values.get("outlet_name", ""),
+                "outlet_type": record.values.get("outlet_type", ""),
                 "state": int(record.get_value()),
                 "state_display": "ON" if int(record.get_value()) == 1 else "OFF",
             })
@@ -147,55 +185,65 @@ def query_outlets(tenant_id: str) -> list:
 MLOG_TYPE_MAP = {1: "KH", 2: "Ca", 4: "Mg", 5: "NO3", 6: "PO4"}
 MLOG_UNITS = {"KH": "dkh", "Ca": "ppm", "Mg": "ppm", "NO3": "ppm", "PO4": "ppm"}
 
-def write_water_tests(tenant_id: str, readings: list[dict], bucket_name: str = "") -> int:
+def write_water_tests(tenant_id: str, readings: list[dict], bucket_name: str = "", apex_id: str = "") -> int:
     """Write water test results to InfluxDB as apex_water_tests measurement.
     Performs atomic replace: deletes existing apex_water_tests measurement first.
     """
     bucket = bucket_name or ensure_tenant_bucket(tenant_id)
     client = get_influx_client()
-    
+
     # Atomic replace
-    delete_api = client.delete_api()
-    delete_api.delete(start="1970-01-01T00:00:00Z", stop="2100-01-01T00:00:00Z", 
-                      predicate='_measurement="apex_water_tests"', bucket=bucket, org=settings.influx_org)
-    
+    try:
+        delete_api = client.delete_api()
+        delete_api.delete(start="1970-01-01T00:00:00Z", stop="2100-01-01T00:00:00Z",
+                          predicate='_measurement="apex_water_tests"', bucket=bucket, org=settings.influx_org)
+    except Exception as e:
+        log.error("write_water_tests: delete failed for tenant %s: %s", tenant_id[:8], e)
+        # Continue anyway — write may still succeed
+
     write_api = client.write_api(write_type=SYNCHRONOUS)
     points = []
     for r in readings:
         m_type = r.get("type")
         param = MLOG_TYPE_MAP.get(m_type, "Unknown")
         unit = MLOG_UNITS.get(param, "unknown")
-        
+
         point = Point("apex_water_tests") \
             .tag("tenant_id", tenant_id) \
+            .tag("apex_id", apex_id) \
             .tag("parameter", param) \
             .tag("unit", unit) \
             .field("value", float(r.get("value", 0)))
-        
+
         if r.get("date"):
-            # Assuming date format is compatible with InfluxDB or ISO
             point.time(r["date"])
         points.append(point)
-    
+
     if points:
-        write_api.write(bucket=bucket, record=points)
+        try:
+            write_api.write(bucket=bucket, record=points)
+        except Exception as e:
+            log.error("write_water_tests failed for tenant %s: %s", tenant_id[:8], e)
+            return 0
     return len(points)
 
-def query_water_tests(tenant_id: str, parameter: str = "", duration: str = "365d") -> list:
+def query_water_tests(tenant_id: str, parameter: str = "", duration: str = "365d", apex_id: str = "") -> list:
     bucket = ensure_tenant_bucket(tenant_id)
     client = get_influx_client()
     query_api = client.query_api()
-    
+
     param_filter = f'|> filter(fn: (r) => r["parameter"] == "{parameter}")' if parameter else ""
-    
-    query = f"""
+    apex_filter = f'|> filter(fn: (r) => r["apex_id"] == "{apex_id}")' if apex_id else ""
+
+    query = f"""\
     from(bucket: "{bucket}")
       |> range(start: -{duration})
       |> filter(fn: (r) => r["_measurement"] == "apex_water_tests")
       {param_filter}
+      {apex_filter}
       |> yield(name: "water_tests")
     """
-    
+
     tables = query_api.query(query)
     results = []
     for table in tables:
@@ -211,26 +259,30 @@ def query_water_tests(tenant_id: str, parameter: str = "", duration: str = "365d
 # Notes
 NOTE_TYPES = {0: "Basic", 1: "Good", 2: "Bad", 3: "Ugly", 4: "Maintenance", 5: "Event"}
 
-def write_notes(tenant_id: str, notes: list[dict], bucket_name: str = "") -> int:
+def write_notes(tenant_id: str, notes: list[dict], bucket_name: str = "", apex_id: str = "") -> int:
     """Write tank notes to InfluxDB as apex_logs measurement.
     Performs atomic replace: deletes existing apex_logs measurement first.
     """
     bucket = bucket_name or ensure_tenant_bucket(tenant_id)
     client = get_influx_client()
-    
+
     # Atomic replace
-    delete_api = client.delete_api()
-    delete_api.delete(start="1970-01-01T00:00:00Z", stop="2100-01-01T00:00:00Z", 
-                      predicate='_measurement="apex_logs"', bucket=bucket, org=settings.influx_org)
-    
+    try:
+        delete_api = client.delete_api()
+        delete_api.delete(start="1970-01-01T00:00:00Z", stop="2100-01-01T00:00:00Z",
+                          predicate='_measurement="apex_logs"', bucket=bucket, org=settings.influx_org)
+    except Exception as e:
+        log.error("write_notes: delete failed for tenant %s: %s", tenant_id[:8], e)
+
     write_api = client.write_api(write_type=SYNCHRONOUS)
     points = []
     for n in notes:
         n_type = n.get("type", 0)
         n_type_name = NOTE_TYPES.get(n_type, "Basic")
-        
+
         point = Point("apex_logs") \
             .tag("tenant_id", tenant_id) \
+            .tag("apex_id", apex_id) \
             .tag("note_id", str(n.get("id", ""))) \
             .tag("type_code", str(n_type)) \
             .tag("type_name", n_type_name) \
@@ -239,13 +291,17 @@ def write_notes(tenant_id: str, notes: list[dict], bucket_name: str = "") -> int
             .tag("has_comment", "true" if n.get("text") else "false") \
             .field("value", 1.0) \
             .field("comment", n.get("text", ""))
-        
+
         if n.get("date"):
             point.time(n["date"])
         points.append(point)
-    
+
     if points:
-        write_api.write(bucket=bucket, record=points)
+        try:
+            write_api.write(bucket=bucket, record=points)
+        except Exception as e:
+            log.error("write_notes failed for tenant %s: %s", tenant_id[:8], e)
+            return 0
     return len(points)
 
 def query_notes(tenant_id: str, duration: str = "365d", limit: int = 100) -> list:
@@ -253,7 +309,7 @@ def query_notes(tenant_id: str, duration: str = "365d", limit: int = 100) -> lis
     client = get_influx_client()
     query_api = client.query_api()
 
-    query = f"""
+    query = f"""\
     from(bucket: "{bucket}")
       |> range(start: -{duration})
       |> filter(fn: (r) => r["_measurement"] == "apex_logs")
@@ -263,7 +319,6 @@ def query_notes(tenant_id: str, duration: str = "365d", limit: int = 100) -> lis
 
     tables = query_api.query(query)
     # Deduplicate by note_id — InfluxDB stores each field as a separate series
-    # (one for "value", one for "comment"), so raw iteration yields 2 records per note.
     notes_map: dict[str, dict] = {}
     for table in tables:
         for record in table.records:
@@ -287,6 +342,5 @@ def query_notes(tenant_id: str, duration: str = "365d", limit: int = 100) -> lis
             if field == "comment":
                 notes_map[nid]["comment"] = record.get_value() or ""
 
-    # Sort by time desc, apply limit
     sorted_notes = sorted(notes_map.values(), key=lambda n: n.get("time", ""), reverse=True)
     return sorted_notes[:limit]

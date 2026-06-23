@@ -150,7 +150,7 @@ def _collect_tenant(tcfg: dict) -> dict:
                 })
 
             if readings:
-                count = write_telemetry(tenant_id, readings)
+                count = write_telemetry(tenant_id, readings, apex_id=apex_id)
                 result["readings"] = count
                 log.info("Tenant %s: wrote %d live readings", tenant_id[:8], count)
 
@@ -169,13 +169,14 @@ def _collect_tenant(tcfg: dict) -> dict:
                 is_on = int(state_str in ("ON", "AON", "PF1", "PF2", "PF3", "PF4"))
                 outlet_points.append({
                     "outlet_name": out.get("name", ""),
+                    "outlet_type": out.get("type", ""),
                     "state": is_on,
                     "state_display": state_str,
                     "timestamp": now,
                 })
 
             if outlet_points:
-                count = write_outlets(tenant_id, outlet_points)
+                count = write_outlets(tenant_id, outlet_points, apex_id=apex_id)
                 result["outlets"] = count
 
         # --- 3. Power/Energy probes (Watts, Amps) ---
@@ -220,7 +221,7 @@ def _collect_tenant(tcfg: dict) -> dict:
                 })
 
             if power_points:
-                count = write_power(tenant_id, power_points)
+                count = write_power(tenant_id, power_points, apex_id=apex_id)
                 result["power"] = count
                 log.info("Tenant %s: wrote %d power readings", tenant_id[:8], count)
 
@@ -230,7 +231,7 @@ def _collect_tenant(tcfg: dict) -> dict:
             try:
                 mlog_data = client.get_mlog(apex_id, days=365)
                 if mlog_data:
-                    count = write_water_tests(tenant_id, mlog_data)
+                    count = write_water_tests(tenant_id, mlog_data, apex_id=apex_id)
                     result["water_tests"] = count
                     log.info("Tenant %s: wrote %d water test records", tenant_id[:8], count)
                 else:
@@ -244,7 +245,7 @@ def _collect_tenant(tcfg: dict) -> dict:
             try:
                 notes_data = client.get_all_notes(apex_id, days=30)
                 if notes_data:
-                    count = write_notes(tenant_id, notes_data)
+                    count = write_notes(tenant_id, notes_data, apex_id=apex_id)
                     result["notes"] = count
                     log.info("Tenant %s: wrote %d notes", tenant_id[:8], count)
                 else:
