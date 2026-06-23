@@ -1,168 +1,108 @@
 # ReefMind — Data Collection Backlog Analysis
 
-> Generated: 2026-06-21. Full audit of what Fusion collects vs what's possible.
+> Generated: 2026-06-21. Last updated: 2026-06-23 (v0.1.2).
+> Full audit of what Fusion collects vs what's possible.
 > Each section is a self-contained GitHub Issue candidate.
 
 ---
 
-## Summary: What We Collect vs What Fusion Makes Available
+## Summary: Delivery Status
+
+| # | Issue | Status | Release | Area |
+|---|-------|--------|---------|------|
+| 1 | 🔌 Power Monitoring (Watts/Amps) | ✅ **Delivered** | v0.1.1 | Collector |
+| 2 | 🏷️ Device Grouping (device_id/device_group) | ✅ **Delivered** | v0.1.2 | Collector |
+| 3 | 📦 Historical ilog Backfill | ✅ **Delivered** | v0.1.2 | Collector |
+| 4 | 📡 Non-Probe Inputs (Feed, Alarms) | 📋 P2 — Open | — | Collector |
+| 5 | 🖥️ Controller System Health | ✅ **Delivered** | v0.1.2 | Collector + UI |
+| 6 | 🧪 Water Tests (Mlog) | ✅ **Delivered** | v0.1.1 | Collector |
+| 7 | 🔌 Store Outlet Type | ✅ **Delivered** | v0.1.2 | Collector |
+| 8 | 🔄 Multi-Controller Support | 📋 P3 — Open | — | Collector |
+| 9 | 🛠️ Client Consolidation | 📋 P3 — Open | — | Code Quality |
+| 10 | 🧹 Remove Debug Prints | ✅ **Delivered** | v0.1.2 | Code Quality |
+| 11 | 🛡️ Error Handling for Writes | ✅ **Delivered** | v0.1.2 | Code Quality |
+| 12 | 📊 Outlet Detail Panel | 📋 P2 — Open | — | Frontend |
+| 13 | 📊 Water Test Charts | ✅ **Delivered** | v0.1.1 | Frontend |
+| 14 | 🏷️ Controller ID Tag | ✅ **Delivered** | v0.1.2 | Schema |
+| 15 | 📊 Outlet State Timeline | 📋 P2 — Open | — | Frontend |
 
 ### Currently Collected (by `cloud/api/app/services/collector.py`)
 
 | Data | Measurement | Tags | Fields | Interval |
 |------|------------|------|--------|----------|
-| Probe readings | `apex_telemetry` | tenant_id, probe_name, probe_type, unit, did | value (float) | 5min |
-| Outlet ON/OFF | `apex_outlet_states` | tenant_id, outlet_name | state (0/1), state_display | 5min |
+| Probe readings | `apex_telemetry` | tenant_id, apex_id, probe_name, probe_type, unit, did | value (float) | 5min |
+| Outlet ON/OFF | `apex_outlet_states` | tenant_id, apex_id, outlet_name, outlet_type, device_id, device_group | state (0/1), state_display | 5min |
+| Power (Watts/Amps) | `apex_power` | tenant_id, apex_id, outlet_name, channel | watts, amps | 5min |
+| Water tests | `apex_water_tests` | tenant_id, apex_id, parameter, unit | value (float) | 5min (atomic replace) |
+| Tank notes | `apex_logs` | tenant_id, apex_id, note_id, type_code, type_name, title, reason_code, has_comment | value, comment | 5min (atomic replace) |
+| Controller info | `apex_controller_info` | tenant_id, apex_id, serial | hardware, software, timezone, name | 5min (atomic replace) |
 
 ### Available from Fusion But NOT Collected
 
-| Data | Fusion Source | Impact |
-|------|-------------|--------|
-| Outlet power (watts, amps) | status.outputs[].status[1..3] | No energy monitoring in dashboard |
-| Device grouping | config.outputs[].did prefix | Can't show which EB832/device outlets belong to |
-| Outlet type info | config.outputs[].type | No outlet category context in UI |
-| Feed cycle state | status.inputs | No feed mode awareness |
-| Alarm status | status.inputs (non-probe) | No alerting |
-| Historical ilog data | /api/apex/{id}/ilog | Gaps when collector is restarted/changed |
-| Mlog (water tests) | /mlog endpoint | No KH/Ca/Mg tracking |
-| Tank notes | /log endpoint | No observation history |
-| Controller health info | detail.hardware, detail.software, detail.serial | No firmware tracking |
-| Non-probe inputs | status.inputs (leak sensors, flow, etc.) | Lost data for expansion modules |
-| Fusion account/controller list | /api/apex, /api/account | No multi-controller awareness |
+| Data | Fusion Source | Impact | Issue |
+|------|-------------|--------|-------|
+| Feed cycle state | status.inputs | No feed mode awareness | #4 |
+| Alarm status | status.inputs (non-probe) | No alerting | #4 |
+| Non-probe inputs | status.inputs (leak sensors, flow, etc.) | Lost data for expansion modules | #4 |
+| Fusion account/controller list | /api/apex, /api/account | No multi-controller awareness | #8 |
+
+---
+
+### Current Backlog Priority (What's Left)
+
+**P2 — Worth Doing** (next candidates):
+- **#4 (Non-Probe Inputs)** — ~1-2 hr. Collects feed/alarm/leak/flow data. Niche but useful for Nemo alerts.
+- **#12 (Outlet Detail Panel)** — ~4-6 hr. UI for power/device/type. Depends on #1, #2, #7 (all done). Self-service now.
+
+**P3 — Lower Urgency**:
+- **#15 (Outlet Timeline)** — ~6-8 hr. Big UI effort, nice-to-have.
+- **#8 (Multi-Controller)** — ~3-5 hr. Depends on #14 (done). Low unless user has multiple Apex units.
+- **#9 (Client Consolidation)** — ~3-4 hr. Pure code health, no user-facing change.
 
 ---
 
 ## Issue 1: Fusion Power Monitoring — Collect Amps/Watts Per Outlet
 
-**Area:** Fusion Collector Data Enrichment
-**Priority:** High — user-facing energy tracking
-**Difficulty:** Medium
-**Estimate:** ~3-4 hours
+**✅ DELIVERED v0.1.1 (June 23, 2026)**
 
-### Background
+**What was implemented:**
+- Collector detects Watts/Amps probes by DID suffix (`_Watts`, `_Amps`, `_w`, `_a`)
+- `write_power()` writes to `apex_power` measurement in InfluxDB
+- Power collection gated behind `"power"` data-area toggle in Settings
+- API endpoint exposes power data through telemetry router
+
+**Original background (for reference):**
 The Fusion API returns per-outlet power data in the `status.outputs[].status` array. Each outlet's status is an array where `status[0]` = state string (ON/AON/OFF), and additional elements contain power telemetry (watts, amps, frequency) for EnergyBar 832 outlets. The current collector only reads `status[0]`.
-
-### What Fusion Returns
-```json
-{
-  "did": "2_1",
-  "status": ["AON", 120, 3.5, 60]
-  //         state, watts, amps, freq
-}
-```
-
-The EnergyBar 832 reports **watts** (index 1) and **amps** (index 2) for monitored outlets. Non-monitored outlets (EB8, standard relays) only have `["AON"]` or `["OFF"]`.
-
-### What Needs to Change
-
-**File: `cloud/api/app/services/collector.py`**
-In `_collect_tenant()`, section 2 (Outlet states, ~line 126-146):
-1. After extracting `state_arr`, read additional elements:
-   - `state_arr[1]` = watts (float) if present and parseable
-   - `state_arr[2]` = amps (float) if present and parseable
-2. Write power data to `apex_power` measurement using the existing `write_power()` function
-
-**File: `cloud/api/app/services/influx.py`**
-The `write_power()` function already exists with correct schema:
-- Measurement: `apex_power`
-- Tags: tenant_id, outlet_name, channel
-- Fields: watts, amps
-- The channel tag should be the outlet's DID (e.g. "2_1")
-
-**File: `cloud/api/app/services/fusion_live.py`**
-In `get_all_outlet_states()`, return the raw status array untouched so the collector can parse it.
-
-### Verify
-```python
-# After fix, collector log should show power writes
-# Expected: "Tenant abc123: 8 readings, 32 outlets, 18 power channels"
-# Confirm InfluxDB: from(bucket:"reefmind_...") |> range(start:-10m) |> filter(fn: (r) => r._measurement == "apex_power")
-```
-
-### Pitfalls
-- Some outlets won't have power data — handle gracefully with None/fallback
-- EnergyBar 832 reports 120V/60Hz baseline on some regions — don't mistake frequency for power
-- Existing `write_power()` signature expects `outlet_name`, `watts`, `amps`, `channel` — map correctly
-- Collector currently has no `write_power()` call — must import and invoke it
 
 ---
 
 ## Issue 2: Device Grouping for Outlets — Add device_id & device_group Tags
 
-**Area:** Fusion Collector Data Enrichment
-**Priority:** Medium
-**Difficulty:** Easy
-**Estimate:** ~1 hour
+**✅ DELIVERED v0.1.2 (June 23, 2026)**
 
-### Background
-The local collector (`apex_unified_scraper.py`) tags each outlet state with `device_id` and `device_group` using `get_device_group()` to map the DID prefix to a human-readable group (EB832_1, EB832_2, EB8_4, Vortech, Base, Virtual, Alarm, Feeder, Other). This enables dashboard filters like "show only EnergyBar outlets" or "hide virtual outlets." The Fusion collector has no equivalent tagging.
-
-### The DID Prefix Convention
-| DID prefix | Device Group | Example |
-|------------|-------------|---------|
-| `2_` | EB832_1 | `2_1`, `2_2` |
-| `5_` | EB832_2 | `5_1` |
-| `4_` | EB8_4 | `4_1` |
-| `3_` | Vortech | `3_1` |
-| `base_` | Base | `base_Out1` |
-| `7_` | Feeder | `7_1` |
-| `Cntl_` | Virtual | `Cntl_Virtual` |
-| `1_` | Alarm | `1_1` |
-
-### What Needs to Change
-
-**File: `cloud/api/app/services/collector.py`**
-Add a `get_device_group(did)` function (or import equivalent) and attach `device_id` and `device_group` tags to outlet InfluxDB points.
-
-**File: `cloud/api/app/services/influx.py`**
-Update `write_outlets()` — add optional `device_id` and `device_group` tags to the `apex_outlet_states` Point.
-
-### Why This Matters
-- Dashboard could show "Outlet Status by Device" grid
-- Users can hide virtual/feeder/alarm outlets in charts
-- Nemo context can reference physical vs virtual outlets
+**What was implemented:**
+- `_get_device_group(did)` function in collector.py parses DID prefixes
+- Prefix mapping: `2_`→EB832_1, `5_`→EB832_2, `3_`→Vortech, `4_`→EB8_4, `base_`→Base, `7_`→Feeder, `Cntl_`→Virtual, `1_`→Alarm
+- Each outlet point tagged with `device_id` and `device_group` in InfluxDB
+- `query_outlets()` returns `device_id` and `device_group` in its response
 
 ---
 
 ## Issue 3: Historical Probe Data Backfill — Expose ilog in Fusion Collector
 
-**Area:** Fusion Collector Data Enrichment
-**Priority:** Medium
-**Difficulty:** Medium
-**Estimate:** ~4-6 hours
+**✅ DELIVERED v0.1.2 (June 23, 2026)**
 
-### Background
-Fusion's `/api/apex/{id}/ilog?days=N` endpoint returns 10-minute resolution historical probe data going back ~7 days (Fusion caps ilog at 7 days). The existing cron scripts (`apex_fusion_ilog_sync.py`) already use this, but it runs as a separate weekly cron in the legacy Docker setup — the cloud Fusion collector never calls it.
-
-The current collector only takes point-in-time snapshots every 5 minutes. If the collector was down for 30 minutes, there's a gap. The ilog endpoint provides a backfill mechanism.
-
-### What Needs to Change
-
-**File: `cloud/api/app/services/collector.py`**
-On the first poll for a tenant (first run ever), call `/ilog?days=7` to backfill the last 7 days of probe data with 10-minute resolution before starting 5-minute live polling.
-
-Or run ilog backfill as part of the tenant onboarding flow in the discovery step.
-
-**File: `cloud/api/app/services/fusion_live.py`**
-The `get_probe_history()` method exists but is never called by the collector. It returns per-probe history — we need to adapt it for bulk backfill (all probes at once).
-
-### Verify
-```python
-# After backfill: check for non-empty ilog history in InfluxDB
-# from(bucket:"reefmind_...") |> range(start:-7d) |> filter(fn: (r) => r._measurement == "apex_telemetry") |> count()
-# Count should be > (5min interval * 7 days = ~2016 points per probe) * N probes
-# With ilog (10min res): ~1008 points per probe * N probes
-```
-
-### Pitfalls
-- Fusion's ilog endpoint rejects days >= 10 — cap at 7
-- InfluxDB dedup handles overlapping time ranges, but use idempotent writes
-- Rate-limit: don't hammer ilog on every poll — once at onboarding is enough
-- Could add a `backfill_complete` flag to tenant config in Postgres
+**What was implemented:**
+- On first poll per tenant, collector fetches 7 days of historical probe data from Fusion ilog API
+- Writes history as telemetry points (same measurement as live data)
+- Sets `backfill_complete: true` in tenant `config_json` (PostgreSQL jsonb)
+- Subsequent polls skip backfill
 
 ---
 
 ## Issue 4: Collect Non-Probe Status Inputs (Feed, Alarms, Leak Sensors)
+
+**📋 P2 — BACKLOG**
 
 **Area:** Fusion Collector Data Enrichment
 **Priority:** Low
@@ -198,84 +138,45 @@ Add `write_raw_inputs()` function (or extend the existing flow).
 
 ## Issue 5: Controller System Health Tracking (Firmware, Uptime, Connectivity)
 
-**Area:** Fusion Collector Data Enrichment
-**Priority:** Low
-**Difficulty:** Easy
-**Estimate:** ~1 hour
+**✅ DELIVERED v0.1.2 (June 23, 2026)**
 
-### Background
-The `/api/apex/{id}` response includes system metadata like `hardware`, `software` (firmware), `serial`, and `timezone`. The local collector tracks controller uptime/connectivity in `apex_controller_status`. The Fusion collector has none of this.
-
-### What Needs to Change
-
-**File: `cloud/api/app/services/collector.py`**
-On each poll, log the hardware/software versions. If they change from previously stored values (in tenant config or dedicated measurement), flag it.
-
-Add a new measurement `apex_controller_info` with:
-- Tags: tenant_id, apex_id
-- Fields: hardware (str), software (str), serial (str), timezone (str)
-- This is a once-per-run write unless values change
-
-### Why This Matters
-- Users get notified when firmware changes
-- Dashboard shows controller model/serial
-- Multi-controller deployments can identify which Apex is which
+**What was implemented:**
+- `get_controller_info()` added to FusionLiveClient — extracts hardware, software, serial, timezone from Fusion detail response
+- New `apex_controller_info` measurement in InfluxDB with atomic-replace pattern
+- New `write_controller_info()` and `query_controller_info()` in influx.py
+- Collector fetches controller info every poll cycle
+- New API endpoint `GET /api/telemetry/controller`
+- Controller Info card on Settings page showing Hardware, Firmware, Serial, Timezone
 
 ---
 
 ## Issue 6: Collect Mlog (Water Test Results) from Fusion
 
-**Area:** Fusion Collector Data Enrichment
-**Priority:** Medium
-**Difficulty:** Medium
-**Estimate:** ~3-4 hours
+**✅ DELIVERED v0.1.1 (June 23, 2026)**
 
-### Background
-The legacy cron container runs `apex_mlog_sync.py` to pull water test results (KH, Ca, Mg, NO3, PO4) from Fusion's `/mlog` endpoint. The cloud collector does not. This means manually-entered water tests from the Fusion dashboard or Apex display are invisible in ReefMind.
-
-### What Needs to Change
-
-**File: `cloud/api/app/services/collector.py`** (or new dedicated sync script)
-Add an `/mlog` poll that fetches recent water test results and stores them in a new InfluxDB measurement `apex_water_tests` with:
-- Tags: tenant_id, parameter (KH/Ca/Mg/NO3/PO4)
-- Fields: value, unit
-- Time: from the log entry timestamp
-
-This could run less frequently (every 6h) since water tests are entered manually.
-
-### API Endpoint
-```python
-resp = client._get(f"/api/apex/{apex_id}/mlog?days=30")
-# Returns list of {date, name, value, unit}
-```
-
-### Verify
-- Check InfluxDB: `from(bucket: "reefmind_...") |> range(start:-30d) |> filter(fn: (r) => r._measurement == "apex_water_tests")`
-- Dashboard trend charts for KH/Ca/Mg over time
+**What was implemented:**
+- `get_mlog()` method in FusionLiveClient
+- `write_water_tests()` and `query_water_tests()` in InfluxDB service with atomic replace pattern
+- Collector pulls mlog data every 5 minutes
+- API endpoint `GET /api/telemetry/water-tests`
+- WaterTestPage frontend component with latest-value cards and inline trend charts (TimeSeriesChart)
 
 ---
 
 ## Issue 7: Fusion Collector Should Store Outlet Type from Config
 
-**Area:** Fusion Collector Data Enrichment
-**Priority:** Low
-**Difficulty:** Easy
-**Estimate:** ~30 minutes
+**✅ DELIVERED v0.1.2 (June 23, 2026)**
 
-### Background
-`config.outputs` has a `type` field per outlet (e.g. "Variable", "Switch", "Pump", "Heater"). The collector ignores it. This type indicates the physical device class and could inform dashboard UI (show a dimmer slider for Variable outlets, a toggle for Switch).
-
-### What Needs to Change
-
-**File: `cloud/api/app/services/influx.py`**
-Add `outlet_type` as a tag on the `apex_outlet_states` Point.
-
-**File: `cloud/api/app/services/collector.py`**
-Pass `out.get("type", "")` from config_outputs into the outlet point.
+**What was implemented:**
+- `outlet_type` tag added to `apex_outlet_states` measurement
+- Collector pulls `type` from Fusion `config.outputs[]` (Variable, Switch, Pump, Heater)
+- `query_outlets()` returns `outlet_type` in response
 
 ---
 
 ## Issue 8: Fan-out Collector Polls to All Discovered Controllers
+
+**📋 P3 — BACKLOG**
 
 **Area:** Fusion Collector Multi-Controller
 **Priority:** Low
@@ -295,12 +196,17 @@ A single Fusion account can have multiple Apex controllers (e.g., one on the dis
 **File: `cloud/api/app/models/tenant.py`**
 Add a `fusion_apex_ids` JSON array field to store multiple controller IDs.
 
+### Prerequisites
+- ✅ Issue #14 (Controller ID tag) — done in v0.1.2
+
 ---
 
 ## Issue 9: Backend Code Quality — Deduplicate Fusion Client Implementations
 
+**📋 P3 — BACKLOG**
+
 **Area:** Code Architecture / Tech Debt
-**Priority:** Medium
+**Priority:** Low
 **Difficulty:** Medium
 **Estimate:** ~3-4 hours
 
@@ -318,65 +224,46 @@ Each has duplicated login flow, CSRF handling, session management, and error han
 3. `FusionLiveClient.get_live_readings()` and `get_all_outlet_states()` carry over
 4. Legacy `scripts/apex_fusion_client.py` stays as-is for backward compatibility with cron scripts
 
-### Pitfalls
-- `fusion_live.py` uses `request` module directly; `fusion_discovery.py` does too — similar but not identical error handling
-- `fusion_discovery.py` has a richer `discover()` method that calls `/api/account`, `/api/apex`, and per-controller detail
-- Must ensure all call sites are updated: `routers/telemetry.py`, `routers/nemo.py`, `routers/fusion.py`
-
 ---
 
 ## Issue 10: Backend Code Quality — Remove Debug Print Statements from Production Code
 
-**Area:** Code Quality / Cleanup
-**Priority:** Low
-**Difficulty:** Trivial
-**Estimate:** ~15 minutes
+**✅ DELIVERED v0.1.2 (June 23, 2026)**
 
-### Background
-`services/influx.py` has `print(f"DEBUG ...")` statements in `query_outlets()` (~lines 121, 131, 141). These were added during the outlet-display debugging session. They leak internal state to stdout and shouldn't be in production code.
-
-### What Needs to Change
-Replace `print(f"DEBUG query_outlets: ...")` with `log.debug("query_outlets: ...")` using the module's logger.
-
-### Files
-- `cloud/api/app/services/influx.py` — lines 121, 131, 141
+**What was implemented:**
+- Replaced 3 `print(f"DEBUG ...")` statements in `services/influx.py:query_outlets()` with proper `log.debug()` calls
+- Added `logging.getLogger(__name__)` to the module
 
 ---
 
 ## Issue 11: Backend Code Quality — Missing Error Handling for InfluxDB Write Failures
 
-**Area:** Code Quality / Resilience
-**Priority:** Medium
-**Difficulty:** Easy
-**Estimate:** ~1 hour
+**✅ DELIVERED v0.1.2 (June 23, 2026)**
 
-### Background
-`write_telemetry()`, `write_outlets()`, and `write_power()` in `services/influx.py` have no error handling. If InfluxDB is down or the bucket doesn't exist, the function throws an unhandled exception that propagates up through the collector loop and (in the worst case) crashes the collector for that tenant.
-
-The collector's exception handler at line 150 catches this with a generic `except Exception` — but the damage is already done: the entire tenant cycle fails.
-
-### What Needs to Change
-
-**File: `cloud/api/app/services/influx.py`**
-Wrap each `write_api.write()` call in try/except and:
-1. Log the error with context (tenant_id, measurement, point count)
-2. Re-raise only for truly fatal errors (auth failure)
-3. Return 0 for transient failures (connection refused, timeout)
-
-**Alternative:** The `ensure_tenant_bucket()` function does handle bucket auto-creation, but the write itself has no retry.
+**What was implemented:**
+- Wrapped all 5 write functions (`write_telemetry`, `write_outlets`, `write_power`, `write_water_tests`, `write_notes`) in try/except
+- Delete steps for atomic-replace measurements (water_tests, notes) also protected
+- Each failure logs with tenant context and returns 0 instead of crashing the collector cycle
+- One failed measurement no longer loses all other data for that tenant
 
 ---
 
 ## Issue 12: Frontend Enhancement — Outlet Detail Panel (Power, Device, Firmware)
 
+**📋 P2 — BACKLOG**
+
 **Area:** Frontend / UX
 **Priority:** Medium
 **Difficulty:** Medium
 **Estimate:** ~4-6 hours
-**Depends on:** Issue 1 (Power Monitoring), Issue 2 (Device Grouping)
 
 ### Background
-The current `OutletGrid` component shows a simple grid of outlet names with ON/OFF indicators. With Issues 1, 2, 7 done, we'd have per-outlet power data (watts, amps), device grouping, and outlet type — all of which the frontend ignores.
+The current `OutletGrid` component shows a simple grid of outlet names with ON/OFF indicators. With Issues 1, 2, 7 done, per-outlet power data (watts, amps), device grouping, and outlet type are all available in the API — but the frontend ignores them.
+
+### Prerequisites (all ✅)
+- ⚡ Issue 1 — Power Monitoring ✅ (v0.1.1)
+- 🏷️ Issue 2 — Device Grouping ✅ (v0.1.2)
+- 🔌 Issue 7 — Outlet Type ✅ (v0.1.2)
 
 ### What Needs to Change
 
@@ -390,57 +277,36 @@ The current `OutletGrid` component shows a simple grid of outlet names with ON/O
 3. Show power usage summary (total watts per EnergyBar)
 4. Add power monitoring toggle (show/hide power columns)
 
-**New endpoint needed:**
-`GET /api/telemetry/power?tenant_id={id}` — returns current wattage per outlet (could share the `apex_power` measurement)
-
 ---
 
 ## Issue 13: Frontend Enhancement — Water Test History Charts
 
-**Area:** Frontend / UX
-**Priority:** Medium
-**Difficulty:** Medium
-**Estimate:** ~4-5 hours
-**Depends on:** Issue 6 (Mlog Collection)
+**✅ DELIVERED v0.1.1 (June 23, 2026)**
 
-### Background
-The Dashboard only shows live probe readings and outlet states. Water test parameters (KH, Ca, Mg, NO3, PO4) are collected but have no UI. Users currently must use Grafana (separate service) to view these trends.
-
-### What Needs to Change
-
-**New component:** `WaterTestChart.tsx`
-1. Fetch from new `/api/telemetry/water-tests?tenant_id={id}&duration=30d`
-2. Show time-series for each parameter as separate line charts
-3. Add parameter selector (which params to show)
-4. Show latest values as cards above chart
-
-**New API endpoint:** `GET /api/telemetry/water-tests` in `routers/telemetry.py`
+**What was implemented:**
+- `TimeSeriesChart` component imported and used in WaterTestPage
+- Each parameter card (KH, Ca, Mg, NO3, PO4) shows a small inline trend chart
+- Y-axis auto-scale (`scale: true`) ensures small fluctuations are visible
+- Charts query from `GET /api/telemetry/water-tests` endpoint
 
 ---
 
 ## Issue 14: Fusion Collector — Tag Telemetry with Controller ID for Multi-Apex Support
 
-**Area:** Fusion Collector / Schema
-**Priority:** Low
-**Difficulty:** Easy
-**Estimate:** ~30 minutes
-**Depends on:** Issue 8 (Multi-Controller)
+**✅ DELIVERED v0.1.2 (June 23, 2026)**
 
-### Background
-All telemetry points are tagged only with `tenant_id` and `probe_name`. If a tenant has multiple Apex controllers, there's no way to distinguish which controller a reading came from. InfluxDB queries would return merged data.
-
-### What Needs to Change
-Add `apex_id` as a tag to `apex_telemetry`, `apex_outlet_states`, and `apex_power` measurements in the collector. The `apex_id` value comes from `tcfg["fusion_apex_id"]`.
-
-**File: `cloud/api/app/services/collector.py`**
-Pass `apex_id` through to all InfluxDB write calls.
-
-**File: `cloud/api/app/services/influx.py`**
-Update all write functions to accept an optional `apex_id` tag parameter.
+**What was implemented:**
+- Added `apex_id` tag to all 5 InfluxDB measurements: `apex_telemetry`, `apex_outlet_states`, `apex_power`, `apex_water_tests`, `apex_logs`
+- Collector passes `fusion_apex_id` through to every write function
+- `query_water_tests()` supports optional `apex_id` filter parameter
+- Backward compatible — all functions accept `apex_id=""` as default
+- Enables multi-controller filtering (Issue #8)
 
 ---
 
 ## Issue 15: Frontend — Historical Outlet State Timeline
+
+**📋 P2 — BACKLOG**
 
 **Area:** Frontend / UX
 **Priority:** Low
@@ -452,7 +318,7 @@ Outlet states are stored in InfluxDB as a time-series with a field `state` (0 or
 
 ### What Needs to Change
 
-**File: `cloud/web/src/components/OutletGrid.tsx`** or new component `OutletTimeline.tsx`
+**File: `cloud/web/src/components/OutletGrid.tsx`** or new component `OutletTimeline.tsx`**
 1. Add a timeline toggle per outlet
 2. Query `apex_outlet_states` with a state-change detection query
 3. Show a horizontal bar: green = on, gray = off, over 24h window
@@ -467,25 +333,3 @@ from(bucket: "reefmind_{tenant_id}")
   |> difference()
   |> filter(fn: (r) => r._value != 0)  // only state changes
 ```
-
----
-
-## Summary: Priority Order for Implementation
-
-| Order | Issue | Value | Effort |
-|-------|-------|-------|--------|
-| 1 | ⚡ Issue 1 — Power Monitoring | High | Medium |
-| 2 | ⚡ Issue 2 — Device Grouping | Medium | Easy |
-| 3 | ⚡ Issue 6 — Water Tests (Mlog) | Medium | Medium |
-| 4 | 🛠 Issue 9 — Client Consolidation | Medium | Medium |
-| 5 | 🛠 Issue 11 — Write Error Handling | Medium | Easy |
-| 6 | 📊 Issue 12 — Outlet Detail Panel | Medium | Medium |
-| 7 | 🛠 Issue 10 — Remove Debug Prints | Low | Trivial |
-| 8 | 📦 Issue 3 — Historical ilog Backfill | Medium | Medium |
-| 9 | 📊 Issue 13 — Water Test Charts | Medium | Medium |
-| 10 | 🛠 Issue 7 — Store Outlet Type | Low | Easy |
-| 11 | 📊 Issue 15 — Outlet Timeline | Low | Hard |
-| 12 | 📦 Issue 4 — Non-Probe Inputs | Low | Easy |
-| 13 | 🛠 Issue 14 — Controller ID Tag | Low | Easy |
-| 14 | 📦 Issue 5 — System Health | Low | Easy |
-| 15 | 📦 Issue 8 — Multi-Controller | Low | Medium |
