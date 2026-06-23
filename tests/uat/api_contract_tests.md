@@ -13,7 +13,7 @@ Validate that implemented API behavior matches the specification in the source c
 | Method | GET |
 | Route | /api/health |
 | Auth | None |
-| Success (200) | `{"status": "ok", "service": "reefmind-api", "version": "0.1.0"}` |
+| Success (200) | `{"status": "ok", "service": "reefmind-api", "version": "0.1.1"}` |
 | Error | N/A |
 
 ### API-002 — Register

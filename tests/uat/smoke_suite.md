@@ -15,7 +15,7 @@ Quick validation that the application is basically alive and testable. Run these
 ### SMOKE-001 — API health check
 
 - **Step:** `curl -s http://localhost:8000/api/health`
-- **Expected:** HTTP 200, JSON with `status: "ok"`, `service: "reefmind-api"`, `version: "0.1.0"`
+- **Expected:** HTTP 200, JSON with `status: "ok"`, `service: "reefmind-api"`, `version: "0.1.1"`
 - **Status:** [PENDING]
 
 ### SMOKE-002 — Web app loads
