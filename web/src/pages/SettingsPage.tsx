@@ -26,6 +26,17 @@ interface DiscoverResult {
   account: { username: string; email: string };
 }
 
+const ALL_AREA_IDS = ['probes', 'outlets', 'water_tests', 'notes', 'power', 'trident'] as const;
+
+const DATA_AREA_DEFS: Record<string, { icon: string; label: string; desc: string }> = {
+  probes:      { icon: '🌡️', label: 'Probes',        desc: 'Live Temp, pH, ORP, Salinity readings every 5 min' },
+  outlets:     { icon: '🔌', label: 'Outlets',       desc: 'ON/OFF/AON states for all named outlets' },
+  water_tests: { icon: '🧪', label: 'Water Tests',   desc: 'Manual test results — KH, Ca, Mg, NO3, PO4' },
+  notes:       { icon: '📝', label: 'Tank Notes',    desc: 'System notes, maintenance logs, and events' },
+  power:       { icon: '⚡', label: 'Power Usage',   desc: 'Per-outlet wattage & amperage from EnergyBar 832/632' },
+  trident:     { icon: '🤖', label: 'Trident',       desc: 'Auto alk/ca/mg readings (requires Trident hardware)' },
+};
+
 export default function SettingsPage() {
   const [fusionUser, setFusionUser] = useState('');
   const [fusionPass, setFusionPass] = useState('');
@@ -37,6 +48,7 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [enabledAreas, setEnabledAreas] = useState<string[]>(['probes', 'outlets', 'water_tests', 'notes', 'power', 'trident']);
   // Nemo settings
   const [nemoApiKey, setNemoApiKey] = useState('');
   const [nemoProvider, setNemoProvider] = useState('deepseek');
@@ -99,6 +111,7 @@ export default function SettingsPage() {
       await api.post('/api/fusion/save', {
         controller_id: discoverResult.controllers[0].apex_id,
         discovered_data: discoverResult,
+        enabled_areas: enabledAreas,
       });
       setSaved(true);
       setSuccess('Configuration saved! Your dashboard is ready.');
@@ -309,6 +322,44 @@ export default function SettingsPage() {
                 </div>
               </div>
             ))}
+
+            {/* ── Select Data to Collect ── */}
+            <div className="border-t border-slate-700/30 pt-4 mt-4 mb-4">
+              <h3 className="text-sm font-semibold text-white mb-3">📡 Select Data to Collect</h3>
+              <p className="text-xs text-slate-400 mb-3">
+                All areas are enabled by default. Turn off anything that doesn't apply
+                to your tank setup. You can change these later.
+              </p>
+              <div className="space-y-2">
+                {ALL_AREA_IDS.map(aid => {
+                  const def = DATA_AREA_DEFS[aid];
+                  const on = enabledAreas.includes(aid);
+                  return (
+                    <label key={aid}
+                      className="flex items-center gap-3 bg-slate-800/60 rounded-lg px-3 py-2.5 cursor-pointer hover:bg-slate-700/60 transition-colors">
+                      <span className="text-base">{def.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-white">{def.label}</div>
+                        <div className="text-xs text-slate-400 truncate">{def.desc}</div>
+                      </div>
+                      <button type="button" role="switch" aria-checked={on}
+                        onClick={() => {
+                          setEnabledAreas(prev =>
+                            on ? prev.filter(a => a !== aid) : [...prev, aid]
+                          );
+                        }}
+                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                          on ? 'bg-teal-600' : 'bg-slate-600'
+                        }`}>
+                        <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
+                          on ? 'translate-x-[18px]' : 'translate-x-[2px]'
+                        }`} />
+                      </button>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
 
             {!saved && (
               <button

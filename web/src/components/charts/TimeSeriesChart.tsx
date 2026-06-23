@@ -16,10 +16,10 @@ interface Props {
 export default function TimeSeriesChart({ title, data, yLabel, color, large }: Props) {
   const option = {
     backgroundColor: 'transparent',
-    title: {
+    title: title ? {
       text: title,
       textStyle: { color: '#e2e8f0', fontSize: 14 },
-    },
+    } : undefined,
     tooltip: {
       trigger: 'axis',
       textStyle: { color: '#fff' },
@@ -42,6 +42,7 @@ export default function TimeSeriesChart({ title, data, yLabel, color, large }: P
     yAxis: {
       type: 'value',
       name: yLabel,
+      scale: true,
       nameTextStyle: { color: '#94a3b8' },
       axisLabel: { color: '#94a3b8', fontSize: 11 },
       splitLine: { lineStyle: { color: '#334155', type: 'dashed' } },

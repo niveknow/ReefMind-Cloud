@@ -32,6 +32,7 @@ class FusionDiscoverRequest(BaseModel):
 class FusionSaveRequest(BaseModel):
     controller_id: str
     discovered_data: dict
+    enabled_areas: list[str] = []
 
 
 class FusionSaveResponse(BaseModel):
@@ -99,6 +100,21 @@ async def fusion_save(
         "account": req.discovered_data.get("account", {}),
         "discovered_at": datetime.now(timezone.utc).isoformat(),
     }
+
+    # If the user provided area selections, store them
+    if req.enabled_areas:
+        full_meta["enabled_areas"] = req.enabled_areas
+    else:
+        # Existing config may already have enabled_areas — preserve them
+        existing_json = config.config_json
+        if existing_json and existing_json != "{}":
+            try:
+                existing_meta = json.loads(existing_json)
+                if "enabled_areas" in existing_meta:
+                    full_meta["enabled_areas"] = existing_meta["enabled_areas"]
+            except (json.JSONDecodeError, TypeError):
+                pass
+
     config.config_json = json.dumps(full_meta)
 
     await db.commit()

@@ -93,8 +93,8 @@ def query_telemetry(tenant_id: str, probe_name: str = "", duration: str = "24h")
       |> range(start: -{duration})
       |> filter(fn: (r) => r["_measurement"] == "apex_telemetry")
       {where_clause}
-      |> aggregateWindow(every: 5m, fn: mean, createEmpty: false)
-      |> yield(name: "mean")
+      |> sort(columns: ["_time"], desc: false)
+      |> yield(name: "results")
     """
 
     tables = query_api.query(query)
@@ -250,27 +250,41 @@ def query_notes(tenant_id: str, duration: str = "365d", limit: int = 100) -> lis
     bucket = ensure_tenant_bucket(tenant_id)
     client = get_influx_client()
     query_api = client.query_api()
-    
+
     query = f"""
     from(bucket: "{bucket}")
       |> range(start: -{duration})
       |> filter(fn: (r) => r["_measurement"] == "apex_logs")
-      |> limit(n: {limit})
+      |> sort(columns: ["_time"], desc: true)
       |> yield(name: "notes")
     """
-    
+
     tables = query_api.query(query)
-    results = []
+    # Deduplicate by note_id — InfluxDB stores each field as a separate series
+    # (one for "value", one for "comment"), so raw iteration yields 2 records per note.
+    notes_map: dict[str, dict] = {}
     for table in tables:
         for record in table.records:
-            results.append({
-                "time": record.get_time().isoformat() if hasattr(record, "get_time") else str(record["_time"]),
-                "note_id": record.values.get("note_id", ""),
-                "type_code": record.values.get("type_code", ""),
-                "type_name": record.values.get("type_name", ""),
-                "title": record.values.get("title", ""),
-                "reason_code": record.values.get("reason_code", ""),
-                "has_comment": record.values.get("has_comment", "false") == "true",
-                "comment": record.values.get("comment", ""),
-            })
-    return results
+            nid = record.values.get("note_id", "")
+            if not nid:
+                continue
+
+            if nid not in notes_map:
+                notes_map[nid] = {
+                    "time": record.get_time().isoformat() if hasattr(record, "get_time") else str(record["_time"]),
+                    "note_id": nid,
+                    "type_code": record.values.get("type_code", ""),
+                    "type_name": record.values.get("type_name", ""),
+                    "title": record.values.get("title", ""),
+                    "reason_code": record.values.get("reason_code", ""),
+                    "has_comment": record.values.get("has_comment", "false") == "true",
+                    "comment": "",
+                }
+
+            field = record.get_field()
+            if field == "comment":
+                notes_map[nid]["comment"] = record.get_value() or ""
+
+    # Sort by time desc, apply limit
+    sorted_notes = sorted(notes_map.values(), key=lambda n: n.get("time", ""), reverse=True)
+    return sorted_notes[:limit]

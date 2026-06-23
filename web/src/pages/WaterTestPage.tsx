@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import DashboardLayout from '../components/layout/DashboardLayout';
+import TimeSeriesChart from '../components/charts/TimeSeriesChart';
 
 interface WaterTest {
   time: string;
@@ -116,6 +117,19 @@ const WaterTestPage: React.FC = () => {
               {range && (
                 <div className="text-xs text-gray-500 mb-3">
                   Target: {range.min}–{range.max} {unit}
+                </div>
+              )}
+
+              {/* Trend chart */}
+              {readings.length > 1 && (
+                <div className="mb-4">
+                  <TimeSeriesChart
+                    title=""
+                    data={[...readings].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())}
+                    yLabel={unit}
+                    color={color}
+                    large={false}
+                  />
                 </div>
               )}
 
