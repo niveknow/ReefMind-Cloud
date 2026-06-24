@@ -408,7 +408,7 @@ def write_notes(tenant_id: str, notes: list[dict], bucket_name: str = "", apex_i
             return 0
     return len(points)
 
-def query_notes(tenant_id: str, duration: str = "365d", limit: int = 100) -> list:
+def query_notes(tenant_id: str, duration: str = "730d", limit: int = 100) -> list:
     bucket = ensure_tenant_bucket(tenant_id)
     client = get_influx_client()
     query_api = client.query_api()
