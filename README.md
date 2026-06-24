@@ -2,10 +2,10 @@
 
 **Cloud-based multi-tenant SaaS platform for Neptune Apex aquarium controllers.**
 
-Collect telemetry from your Apex controller, visualize real-time probe readings and outlet states, and get AI-powered reef-keeping advice — all without running a local database or Grafana instance.
+Collect telemetry from your Apex controller, visualize real-time probe readings and outlet states, browse tank notes with month/week filtering, and get AI-powered reef-keeping advice — all without running a local database or Grafana instance.
 
-> **Version:** v0.1.0 — Initial Build  
-> **Status:** Working prototype (local dev deployment)  
+> **Version:** v0.1.4 — Notes History & Nemo Insights  
+> **Status:** Working prototype (Docker-based deployment)  
 > **Previous project:** [ReefMind](https://github.com/niveknow/ReefMind) (local on-premise version)
 
 ---
@@ -16,48 +16,42 @@ Collect telemetry from your Apex controller, visualize real-time probe readings 
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| **Backend API** | FastAPI (Python) | Auth, ingest, telemetry, settings, Nemo |
-| **Frontend** | React + Vite + TypeScript + ECharts | Dashboard, settings, CSV import |
+| **Backend API** | FastAPI (Python) | Auth, ingest, telemetry, settings, Nemo AI |
+| **Frontend** | React + TypeScript + Vite + ECharts | Dashboard, tank notes, settings |
 | **Relational DB** | PostgreSQL 16 | Users, tenants, config |
-| **Time-Series DB** | InfluxDB 2.7 | Telemetry, outlet states, power data |
-| **Cache/Queue** | Redis 7 | Async workers, session cache |
+| **Time-Series DB** | InfluxDB 2.7 | Telemetry, outlet states, power, water tests, notes |
+| **Cache/Queue** | Redis 7 | Session cache |
 | **Proxy** | Nginx | Static assets, API reverse proxy |
 
 ### Data Flow
 
 ```
-Apex Controller (user's LAN)
+Fusion Cloud API
     │
-    ├── Agent polls status.xml ──HTTPS──▶ POST /api/ingest/*
+    ├── ilog/mlog/logs sync ──HTTPS──▶ Collector (5min poll)
+    │                                         │
+    │                                    ┌────▼────┐
+    │                                    │ FastAPI  │
+    │                                    │ Backend  │
+    │                                    └┬──┬──┬──┘
+    │                                     │  │  │
+    │                         ┌───────────┘  │  └───────────┐
+    │                         ▼              ▼              ▼
+    │                    ┌─────────┐  ┌──────────┐  ┌──────────┐
+    │                    │Postgres │  │ InfluxDB │  │  Redis   │
+    │                    │(users,  │  │(per-     │  │ (cache)  │
+    │                    │ config) │  │ tenant)  │  │          │
+    │                    └─────────┘  └──────────┘  └──────────┘
     │                                        │
-Fusion Cloud API                             │
-    │                                         │
-    ├── ilog/mlog sync ──HTTPS──▶ POST /api/ingest/*
-    │                                         │
-                                         ┌────▼────┐
-                                         │ FastAPI  │
-                                         │ Backend  │
-                                         └┬──┬──┬──┘
-                                          │  │  │
-                              ┌───────────┘  │  └───────────┐
-                              ▼              ▼              ▼
-                         ┌─────────┐  ┌──────────┐  ┌──────────┐
-                         │Postgres │  │ InfluxDB │  │  Redis   │
-                         │(users,  │  │(per-     │  │ (queue,  │
-                         │ config) │  │ tenant)  │  │  cache)  │
-                         └─────────┘  └──────────┘  └──────────┘
-                                             │
-                                             ▼
-                                     ┌──────────────┐
-                                     │  React Web   │
-                                     │  Dashboard   │
-                                     │  + Nemo AI   │
-                                     └──────────────┘
+    │                                        ▼
+    │                                ┌──────────────┐
+    │                                │  React Web   │
+    │                                │  Dashboard   │
+    │                                │  + Nemo AI   │
+    │                                └──────────────┘
 ```
 
-### Local Development Mode
-
-Everything runs on a single host via Docker Compose. The same stack deploys to a VPS with zero code changes — only environment variables differ.
+All data collection is **server-side** via the Fusion API — no on-prem agent required. The collector polls every 5 minutes for probes, outlets, power, water tests, and tank notes.
 
 ---
 
@@ -65,7 +59,7 @@ Everything runs on a single host via Docker Compose. The same stack deploys to a
 
 ### Prerequisites
 - Docker & Docker Compose v2
-- A Neptune Apex controller on your network (or Fusion API credentials)
+- A Neptune Apex Fusion account with API credentials
 
 ### Setup
 
@@ -109,21 +103,18 @@ ReefMind-Cloud/
 │   │   ├── middleware/auth.py   # JWT + API key auth middleware
 │   │   ├── models/              # SQLAlchemy models
 │   │   │   ├── user.py          # User accounts
-│   │   │   ├── tenant.py        # Tenant config
-│   │   │   └── csv_import.py    # CSV import tracking
+│   │   │   └── tenant.py        # Tenant config (Fusion creds, Nemo API key)
 │   │   ├── routers/
 │   │   │   ├── auth.py          # Register, login, JWT refresh
-│   │   │   ├── telemetry.py     # Probe data & outlet state queries
+│   │   │   ├── telemetry.py     # Probe data, notes, water tests, outlets
 │   │   │   ├── ingest.py        # Agent data ingestion
 │   │   │   ├── fusion.py        # Fusion discovery & live data
 │   │   │   ├── tenant_config.py # Settings management
-│   │   │   ├── csv_import.py    # CSV upload & import
-│   │   │   └── nemo.py          # AI reef assistant
+│   │   │   └── nemo.py          # AI reef assistant (2yr notes context)
 │   │   ├── schemas/             # Pydantic request/response models
 │   │   └── services/
-│   │       ├── auth.py          # Password hashing, JWT tokens
-│   │       ├── influx.py        # InfluxDB read/write operations
-│   │       ├── collector.py     # 5-min Fusion poll loop (daemon)
+│   │       ├── influx.py        # InfluxDB read/write (telemetry, notes, outlets, power, water tests)
+│   │       ├── collector.py     # 5-min Fusion poll loop (probes, outlets, power, water tests, notes)
 │   │       ├── fusion_live.py   # Fusion API live data client
 │   │       └── fusion_discovery.py  # Fusion onboarding discovery
 │   ├── requirements.txt
@@ -133,30 +124,32 @@ ReefMind-Cloud/
 │   ├── src/
 │   │   ├── App.tsx              # Routing + auth context
 │   │   ├── main.tsx             # Entry point
-│   │   ├── api/client.ts        # Axios wrapper with JWT
-│   │   ├── components/charts/
-│   │   │   ├── TimeSeriesChart.tsx  # Temp, pH, ORP, salinity charts
-│   │   │   ├── OutletGrid.tsx       # ON/OFF outlet grid
-│   │   │   └── NemoWidget.tsx       # AI chat widget
 │   │   ├── pages/
 │   │   │   ├── LoginPage.tsx
 │   │   │   ├── RegisterPage.tsx
-│   │   │   ├── DashboardPage.tsx
-│   │   │   ├── SettingsPage.tsx
+│   │   │   ├── DashboardPage.tsx      # Probe charts, outlet grid
+│   │   │   ├── NotesPage.tsx          # Tank Notes w/ month/week filter
+│   │   │   ├── SettingsPage.tsx       # Fusion config, AI settings
+│   │   │   ├── WaterTestPage.tsx      # Water test history & charts
 │   │   │   └── CsvImportPage.tsx
+│   │   ├── components/
+│   │   │   ├── charts/
+│   │   │   │   ├── TimeSeriesChart.tsx
+│   │   │   │   └── OutletGrid.tsx
+│   │   │   └── layout/DashboardLayout.tsx
 │   ├── Dockerfile
 │   ├── nginx.conf
-│   ├── vite.config.ts
 │   └── package.json
 │
 ├── docs/
 │   ├── saas-architecture-review.md     # Archie's full design
 │   ├── saas-implementation-plan.md     # Cody's build plan
 │   ├── saas-project-structure.md       # Original project layout
-│   └── ANALYSIS-BACKLOG.md             # 15-item backlog issues
+│   └── ANALYSIS-BACKLOG.md             # 15-item backlog (with v0.1.4 updates)
 │
-├── docker-compose.yml                  # Full stack (Postgres, InfluxDB, Redis, API, Web)
+├── docker-compose.yml                  # Full stack (Postgres, InfluxDB, Redis, API, Web, Nginx)
 ├── nginx.conf                          # Reverse proxy config
+├── CHANGELOG.md                        # Release history (v0.1.0 → v0.1.4)
 └── .env.example                        # Environment template
 ```
 
@@ -171,18 +164,14 @@ ReefMind-Cloud/
 | POST | `/api/auth/login` | Get JWT |
 | POST | `/api/auth/refresh` | Refresh JWT |
 
-### Ingest (agent API key required)
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/ingest/telemetry` | Push probe readings |
-| POST | `/api/ingest/outlets` | Push outlet states |
-| POST | `/api/ingest/power` | Push power monitoring |
-
 ### Telemetry (JWT required)
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/telemetry/summary` | Latest probe readings |
 | GET | `/api/telemetry/outlets` | Current outlet states |
+| GET | `/api/telemetry/notes` | Tank notes (730d history) |
+| GET | `/api/telemetry/water-tests` | Water test history |
+| GET | `/api/telemetry/controller` | Controller hardware info |
 | GET | `/api/telemetry/{probe}` | Probe history (time range) |
 
 ### Settings
@@ -196,52 +185,88 @@ ReefMind-Cloud/
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/fusion/discover` | Discover Apex controllers from Fusion credentials |
-| POST | `/api/fusion/save` | Save discovered Fusion config to tenant settings |
+| POST | `/api/fusion/save` | Save discovered Fusion config |
 | GET | `/api/fusion/status` | Check Fusion connection status |
 | GET | `/api/fusion/readings` | Live probe readings from Fusion |
-| GET | `/api/fusion/history/{probe_did}` | Probe history from Fusion ilog |
 | GET | `/api/fusion/outlets` | Live outlet states from Fusion |
 
 ### Nemo AI
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/nemo/status` | Check Nemo AI configuration status |
-| POST | `/api/nemo/ask` | Ask the reef-keeping AI assistant |
+| POST | `/api/nemo/ask` | Ask the reef-keeping AI assistant (sees 2yr notes history) |
 
 ---
 
 ## Design Documents
 
-This project was designed by **Archie** (SaaS Architect) and built by **Cody** (Developer Agent):
+This project was designed by **Archie** (SaaS Architect), built by **Cody** (Developer Agent), and QA'd by **Trixie**:
 
 - **[Architecture Review](docs/saas-architecture-review.md)** — Complete system design, decisions, data model, API spec, and migration path (by Archie)
 - **[Implementation Plan](docs/saas-implementation-plan.md)** — Phase-by-phase build plan for Cody (by Archie)
 - **[Project Structure](docs/saas-project-structure.md)** — Original file layout reference
-- **[Backlog](docs/ANALYSIS-BACKLOG.md)** — 15-item feature backlog for future development
+- **[Backlog](docs/ANALYSIS-BACKLOG.md)** — Feature backlog for future development (updated for v0.1.4)
+
+---
+
+## Features Delivered
+
+### v0.1.1 — Water Tests & Power Monitoring
+- Water test (mlog) collection and charting
+- Per-outlet power monitoring (watts/amps)
+- Device grouping by EB832, Vortech, etc.
+
+### v0.1.2 — Controller Health & Backfill
+- Historical probe data backfill (7-day ilog)
+- Controller system health (serial, firmware, timezone)
+- Outlet type tagging (Variable, Switch, Pump)
+- Route ordering fixes, duration button fixes
+- Error handling for InfluxDB writes
+
+### v0.1.3 — Full Notes Backfill
+- 18-month tank notes backfill from Fusion API
+- Multi-tenant notes support
+- InfluxDB HTTP API writes (bypassed stale Python client)
+
+### v0.1.4 — Notes History & Nemo Insights
+- **Tank Notes page** — month/week filter bar, month-jump dropdown, month grouping
+- **Notes history** — extended from 365d to 730d (24 months)
+- **Ask Nemo** — receives 2 years / 50 notes with full comment text
+- Fixed empty note titles causing InfluxDB 400 on backfill
+
+### Collected Data (by `collector.py`)
+
+| Measurement | Tags | Interval | History |
+|------------|------|----------|---------|
+| `apex_telemetry` | tenant_id, apex_id, probe_name, probe_type, unit, did | 5min | 7-day ilog backfill on first poll |
+| `apex_outlet_states` | tenant_id, apex_id, outlet_name, outlet_type, device_id, device_group | 5min | Current state |
+| `apex_power` | tenant_id, apex_id, outlet_name, channel | 5min | Current readings |
+| `apex_water_tests` | tenant_id, apex_id, parameter, unit | 5min (atomic replace) | 365 days |
+| `apex_logs` (notes) | tenant_id, apex_id, note_id, type_code, type_name, title, reason_code, has_comment | 5min (atomic replace) | **730 days** (backfilled) |
+| `apex_controller_info` | tenant_id, apex_id, serial | 5min (atomic replace) | Current state |
 
 ---
 
 ## Design Decisions (from Archie's Review)
 
-| Decision | Choice | Status | Rationale |
-|----------|--------|--------|-----------|
-| Data collection | Server-side Fusion API polling (no agent required) | **Implemented** | Fusion API provides same data as local Apex controller; no on-prem agent needed for MVP |
-| Tenant isolation | Per-tenant InfluxDB buckets | **Implemented** | Native isolation, clean separation |
-| Dashboard | Custom React + ECharts | **Implemented** | Multi-tenant from day 1, full control |
-| Auth | JWT + per-tenant API key | **Implemented** | Simple, no external dependencies |
-| Nemo role | General reef advisor (MVP) | **Implemented** | Per-tank personalization = future tier |
-| Deployment | Same Docker Compose for local + VPS | **Deferred** | Env var switch ready; VPS deployment planned after MVP validation |
-| Background workers | ARQ (Redis-backed) | **Deferred — uses inline asyncio for now** | Fusion collector runs in API lifespan; CSV processing is synchronous |
-| On-prem agent | Separate Docker container for user networks | **Future** | Planned for remote Apex controllers behind NAT |
-| Grafana dashboards | Community JSON import/export | **Changed — custom data flows instead** | Custom integration suits SaaS better than Grafana-derived flows |
+| Decision | Choice | Status |
+|----------|--------|--------|
+| Data collection | Server-side Fusion API polling (no agent required) | **Implemented** |
+| Tenant isolation | Per-tenant InfluxDB buckets | **Implemented** |
+| Dashboard | Custom React + ECharts | **Implemented** |
+| Auth | JWT + per-tenant API key | **Implemented** |
+| Nemo role | General reef advisor with tank data context | **Implemented** (v0.1.4: 2yr notes) |
+| Notes backfill | Monthly-chunked Fusion API with dedup | **Implemented** (v0.1.3) |
+| Notes filtering | Client-side month/week filter with InfluxDB 730d query | **Implemented** (v0.1.4) |
+| Deployment | Same Docker Compose for local + VPS | **Deferred** — env var switch ready |
+| On-prem agent | Separate Docker container | **Future** — planned for NAT'd controllers |
+| Background workers | ARQ (Redis-backed) | **Deferred** — inline asyncio for now |
 
 ---
 
 ## On-Prem Agent
 
-The companion on-prem agent collects data from your Apex controller and pushes it to the cloud API. It's a lightweight Docker container that replaces the old full-stack (InfluxDB + Grafana) local deployment.
-
-> **Note:** The agent is currently under development. For now, the cloud stack runs locally on the same machine as the Apex controller, with the built-in Fusion collector polling data directly from the Fusion API.
+The companion on-prem agent for remote Apex controllers behind NAT is planned but not yet built. For now, the cloud stack collects data directly from the Fusion API — no local agent needed.
 
 ---
 
@@ -256,3 +281,4 @@ MIT — see [LICENSE](LICENSE)
 - **Kevin Nguyen** — Project owner, domain expert
 - **Archie** — SaaS architecture & design
 - **Cody** — Implementation & development
+- **Trixie** — QA & validation

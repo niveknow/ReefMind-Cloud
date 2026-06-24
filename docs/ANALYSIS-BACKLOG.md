@@ -1,6 +1,6 @@
 # ReefMind — Data Collection Backlog Analysis
 
-> Generated: 2026-06-21. Last updated: 2026-06-23 (v0.1.2).
+> Generated: 2026-06-21. Last updated: 2026-06-24 (v0.1.4).
 > Full audit of what Fusion collects vs what's possible.
 > Each section is a self-contained GitHub Issue candidate.
 
@@ -28,18 +28,23 @@
 | — | 🐛 Route Ordering Fix | ✅ **Delivered** | v0.1.2 | Bugfix |
 | — | 🐛 Duration Button Fix | ✅ **Delivered** | v0.1.2 | Bugfix |
 | — | 📄 Fusion API Limits Doc | ✅ **Delivered** | v0.1.2 | Docs |
+| — | 🗒️ Full Notes Backfill (18 months) | ✅ **Delivered** | v0.1.3 | Collector |
+| — | 🗒️ Notes Month/Week Filter | ✅ **Delivered** | v0.1.4 | Frontend |
+| — | 🗒️ 730d Notes History | ✅ **Delivered** | v0.1.4 | API |
+| — | 🤖 Nemo Notes Insights (2yr / 50 notes) | ✅ **Delivered** | v0.1.4 | Nemo |
+| — | 🐛 Empty Note Titles Fix | ✅ **Delivered** | v0.1.4 | Bugfix |
+| — | 🐛 Notes API 100-Limit Removed | ✅ **Delivered** | v0.1.4 | Bugfix |
 
 ### Currently Collected (by `cloud/api/app/services/collector.py`)
 
-| Data | Measurement | Tags | Fields | Interval |
-|------|------------|------|--------|----------|
-| Probe readings | `apex_telemetry` | tenant_id, apex_id, probe_name, probe_type, unit, did | value (float) | 5min (7-day ilog backfill on first poll) |
-| Outlet ON/OFF | `apex_outlet_states` | tenant_id, apex_id, outlet_name, outlet_type, device_id, device_group | state (0/1), state_display | 5min |
-| Power (Watts/Amps) | `apex_power` | tenant_id, apex_id, outlet_name, channel | watts, amps | 5min |
-| Water tests | `apex_water_tests` | tenant_id, apex_id, parameter, unit | value (float) | 5min (atomic replace) |
-| Tank notes | `apex_logs` | tenant_id, apex_id, note_id, type_code, type_name, title, reason_code, has_comment | value, comment | 5min (atomic replace) |
-| Controller info | `apex_controller_info` | tenant_id, apex_id, serial | hardware, software, timezone, name | 5min (atomic replace) |
-| Fusion API limits | — | See §Fusion API Historical Data Limits below | — | — |
+| Data | Measurement | Tags | Fields | Interval | History |
+|------|------------|------|--------|----------|---------|
+| Probe readings | `apex_telemetry` | tenant_id, apex_id, probe_name, probe_type, unit, did | value (float) | 5min | 7-day ilog backfill on first poll |
+| Outlet ON/OFF | `apex_outlet_states` | tenant_id, apex_id, outlet_name, outlet_type, device_id, device_group | state (0/1), state_display | 5min | Current state |
+| Power (Watts/Amps) | `apex_power` | tenant_id, apex_id, outlet_name, channel | watts, amps | 5min | Current readings |
+| Water tests | `apex_water_tests` | tenant_id, apex_id, parameter, unit | value (float) | 5min (atomic replace) | 365 days |
+| Tank notes | `apex_logs` | tenant_id, apex_id, note_id, type_code, type_name, title, reason_code, has_comment | value, comment | 5min (atomic replace) | **18 months backfilled** (API returns 730d) |
+| Controller info | `apex_controller_info` | tenant_id, apex_id, serial | hardware, software, timezone, name | 5min (atomic replace) | Current state |
 
 ### Available from Fusion But NOT Collected
 
@@ -57,29 +62,27 @@
 **P2 — Worth Doing** (next candidates):
 - **#4 (Non-Probe Inputs)** — ~1-2 hr. Collects feed/alarm/leak/flow data. Niche but useful for Nemo alerts.
 - **#12 (Outlet Detail Panel)** — ~4-6 hr. UI for power/device/type. Depends on #1, #2, #7 (all done). Self-service now.
+- **#15 (Outlet Timeline)** — ~6-8 hr. Historical state change visualization per outlet.
 
 **P3 — Lower Urgency**:
-- **#15 (Outlet Timeline)** — ~6-8 hr. Big UI effort, nice-to-have.
 - **#8 (Multi-Controller)** — ~3-5 hr. Depends on #14 (done). Low unless user has multiple Apex units.
 - **#9 (Client Consolidation)** — ~3-4 hr. Pure code health, no user-facing change.
 
 ---
 
----
-
 ## Fusion API Historical Data Limits
 
-The Fusion API caps historical data differently depending on the data type. These limits affect how much history is available when a new tenant connects or when the collector restarts.
+The Fusion API caps historical data differently depending on the data type.
 
 | Data | Fusion Endpoint | Max History | Collector Behavior | Configurable |
 |------|----------------|-------------|-------------------|-------------|
-| **Probe readings** | `/api/apex/{id}/ilog?days=N` | **7 days** (backfill) | One-time backfill on first poll via `BACKFILL_DAYS=7`; thereafter only live snapshots every 5min | Yes — `BACKFILL_DAYS` in `collector.py` |
+| **Probe readings** | `/api/apex/{id}/ilog?days=N` | **7 days** (backfill) | One-time backfill on first poll; thereafter only live snapshots every 5min | Yes — `backfill_days` in tenant config_json |
 | **Water tests** | `/api/apex/{id}/mlog?days=N` | **365 days** | Atomic re-sync every 5min cycle | Yes — `days=365` in `get_mlog()` |
-| **Tank notes** | `/api/apex/{id}/log` (paginated) | **30 days** | Atomic re-sync every 5min cycle | Yes — `days=30` in `get_all_notes()` |
+| **Tank notes** | `/api/apex/{id}/notes` (paginated) | **18 months** (backfilled) | Monthly-chunked backfill on first poll (30-540d in 30d steps); daily 30d cycle thereafter | Backfill auto-runs on first poll; 30d regular window |
 | **Controller info** | `/api/apex/{id}` | Current state only | Written every 5min cycle | N/A |
 | **Outlet states** | `/api/apex/{id}` | Current state only | Written every 5min cycle | N/A |
 
-**Note:** The ilog (probe history) limit of 7 days is our default, not a Fusion API hard limit. The Fusion ilog endpoint accepts higher `days` values, but we chose 7 to balance data density against API load during the initial backfill. Increase `BACKFILL_DAYS` in `collector.py` and reset `backfill_complete` in the tenant's `config_json` to pull deeper history.
+**Note:** Probe backfill uses the Fusion `/logs` endpoint (7-day chunks, limited to `min(backfill_days, 7)` per tenant config). Notes backfill uses the `/notes` endpoint with monthly paginated windows.
 
 ---
 
@@ -93,9 +96,6 @@ The Fusion API caps historical data differently depending on the data type. Thes
 - Power collection gated behind `"power"` data-area toggle in Settings
 - API endpoint exposes power data through telemetry router
 
-**Original background (for reference):**
-The Fusion API returns per-outlet power data in the `status.outputs[].status` array. Each outlet's status is an array where `status[0]` = state string (ON/AON/OFF), and additional elements contain power telemetry (watts, amps, frequency) for EnergyBar 832 outlets. The current collector only reads `status[0]`.
-
 ---
 
 ## Issue 2: Device Grouping for Outlets — Add device_id & device_group Tags
@@ -106,7 +106,6 @@ The Fusion API returns per-outlet power data in the `status.outputs[].status` ar
 - `_get_device_group(did)` function in collector.py parses DID prefixes
 - Prefix mapping: `2_`→EB832_1, `5_`→EB832_2, `3_`→Vortech, `4_`→EB8_4, `base_`→Base, `7_`→Feeder, `Cntl_`→Virtual, `1_`→Alarm
 - Each outlet point tagged with `device_id` and `device_group` in InfluxDB
-- `query_outlets()` returns `device_id` and `device_group` in its response
 
 ---
 
@@ -118,7 +117,6 @@ The Fusion API returns per-outlet power data in the `status.outputs[].status` ar
 - On first poll per tenant, collector fetches 7 days of historical probe data from Fusion ilog API
 - Writes history as telemetry points (same measurement as live data)
 - Sets `backfill_complete: true` in tenant `config_json` (PostgreSQL jsonb)
-- Subsequent polls skip backfill
 
 ---
 
@@ -132,24 +130,12 @@ The Fusion API returns per-outlet power data in the `status.outputs[].status` ar
 **Estimate:** ~1-2 hours
 
 ### Background
-The collector aggressively filters `status.inputs` to ONLY sensor types (Temp, pH, ORP, Cond, Salinity). This drops valuable non-probe data like:
-- **Feed cycle status**: `FeedA`, `FeedB`, `FeedC`, `FeedD` with countdown timers
-- **Alarm inputs**: leak sensors, overflow detectors, high-temp alerts
-- **Expansion probes**: flow meters, depth sensors, PAR meters
-
-Many of these appear as inputs with `did` prefixes that don't start with Tmp/pH/ORP/Sal/base_Cond but still carry useful numeric values.
+The collector aggressively filters `status.inputs` to ONLY sensor types (Temp, pH, ORP, Cond, Salinity). This drops valuable non-probe data like feed cycles, alarm inputs, and expansion probes.
 
 ### What Needs to Change
+**File: `cloud/api/app/services/collector.py`** — Store all inputs as a new measurement `apex_controller_inputs`, tagged with `did` and `probe_name`.
 
-**File: `cloud/api/app/services/collector.py`**
-In the sensor-filtering section (~lines 90-118):
-1. Add a new measurement type `apex_controller_inputs` for non-probe inputs
-2. Store ALL inputs as this measurement, not just sensor types
-3. Tag with `did` and `probe_name`, using a generic `unit: "raw"` for unknowns
-4. Or: create a targeted whitelist of known non-probe DIDs on the controller
-
-**File: `cloud/api/app/services/influx.py`**
-Add `write_raw_inputs()` function (or extend the existing flow).
+**File: `cloud/api/app/services/influx.py`** — Add `write_raw_inputs()` function.
 
 ### Why This Matters
 - Leak sensor history for Nemo alerts
@@ -163,12 +149,10 @@ Add `write_raw_inputs()` function (or extend the existing flow).
 **✅ DELIVERED v0.1.2 (June 23, 2026)**
 
 **What was implemented:**
-- `get_controller_info()` added to FusionLiveClient — extracts hardware, software, serial, timezone from Fusion detail response
-- New `apex_controller_info` measurement in InfluxDB with atomic-replace pattern
-- New `write_controller_info()` and `query_controller_info()` in influx.py
-- Collector fetches controller info every poll cycle
+- `get_controller_info()` — extracts hardware, software, serial, timezone from Fusion detail
+- New `apex_controller_info` measurement in InfluxDB with atomic-replace
 - New API endpoint `GET /api/telemetry/controller`
-- Controller Info card on Settings page showing Hardware, Firmware, Serial, Timezone
+- Controller Info card on Settings page
 
 ---
 
@@ -178,10 +162,10 @@ Add `write_raw_inputs()` function (or extend the existing flow).
 
 **What was implemented:**
 - `get_mlog()` method in FusionLiveClient
-- `write_water_tests()` and `query_water_tests()` in InfluxDB service with atomic replace pattern
+- `write_water_tests()` and `query_water_tests()` in InfluxDB with atomic replace
 - Collector pulls mlog data every 5 minutes
-- API endpoint `GET /api/telemetry/water-tests`
-- WaterTestPage frontend component with latest-value cards and inline trend charts (TimeSeriesChart)
+- `GET /api/telemetry/water-tests` endpoint
+- WaterTestPage with inline trend charts
 
 ---
 
@@ -206,17 +190,7 @@ Add `write_raw_inputs()` function (or extend the existing flow).
 **Estimate:** ~3-5 hours
 
 ### Background
-A single Fusion account can have multiple Apex controllers (e.g., one on the display tank, one on the frag tank). The current `collector.py` only polls `fusion_apex_id` — a single controller ID stored in tenant config. The Fusion discovery endpoint returns all controllers on the account.
-
-### What Needs to Change
-
-**File: `cloud/api/app/services/collector.py`**
-1. Add logic to discover all controllers via `/api/apex` at login time
-2. Store discovered controller IDs in a new table or list in tenant config
-3. Poll ALL controllers, each with their own probe/outlet writes tagged with the source controller ID
-
-**File: `cloud/api/app/models/tenant.py`**
-Add a `fusion_apex_ids` JSON array field to store multiple controller IDs.
+A single Fusion account can have multiple Apex controllers. Current collector only polls `fusion_apex_id`. Discovery endpoint returns all controllers.
 
 ### Prerequisites
 - ✅ Issue #14 (Controller ID tag) — done in v0.1.2
@@ -233,27 +207,22 @@ Add a `fusion_apex_ids` JSON array field to store multiple controller IDs.
 **Estimate:** ~3-4 hours
 
 ### Background
-There are THREE implementations of the Fusion API login+request logic in the cloud API:
-1. `services/fusion_live.py` — `FusionLiveClient` (used by collector + live endpoints)
-2. `services/fusion_discovery.py` — `FusionDiscoverer` (used during onboarding)
-3. `scripts/apex_fusion_client.py` — `FusionClient` (legacy cron scripts, not in cloud API)
-
-Each has duplicated login flow, CSRF handling, session management, and error handling.
+Three implementations of Fusion API login+request logic exist:
+1. `services/fusion_live.py` — `FusionLiveClient`
+2. `services/fusion_discovery.py` — `FusionDiscoverer`
+3. `scripts/apex_fusion_client.py` — legacy cron client
 
 ### What Needs to Change
-1. Consolidate `FusionLiveClient` and `FusionDiscoverer` into a single `FusionClient` in `services/fusion_client.py`
-2. `FusionDiscoverer.discover()` becomes a method on `FusionClient`
-3. `FusionLiveClient.get_live_readings()` and `get_all_outlet_states()` carry over
-4. Legacy `scripts/apex_fusion_client.py` stays as-is for backward compatibility with cron scripts
+Consolidate into a single `FusionClient` in `services/fusion_client.py`.
 
 ---
 
-## Issue 10: Backend Code Quality — Remove Debug Print Statements from Production Code
+## Issue 10: Backend Code Quality — Remove Debug Print Statements
 
 **✅ DELIVERED v0.1.2 (June 23, 2026)**
 
 **What was implemented:**
-- Replaced 3 `print(f"DEBUG ...")` statements in `services/influx.py:query_outlets()` with proper `log.debug()` calls
+- Replaced 3 `print(f"DEBUG ...")` statements with proper `log.debug()` calls
 - Added `logging.getLogger(__name__)` to the module
 
 ---
@@ -263,10 +232,9 @@ Each has duplicated login flow, CSRF handling, session management, and error han
 **✅ DELIVERED v0.1.2 (June 23, 2026)**
 
 **What was implemented:**
-- Wrapped all 5 write functions (`write_telemetry`, `write_outlets`, `write_power`, `write_water_tests`, `write_notes`) in try/except
-- Delete steps for atomic-replace measurements (water_tests, notes) also protected
-- Each failure logs with tenant context and returns 0 instead of crashing the collector cycle
-- One failed measurement no longer loses all other data for that tenant
+- Wrapped all 5 write functions in try/except
+- Delete steps for atomic-replace measurements protected
+- Each failure logs with tenant context and returns 0
 
 ---
 
@@ -279,37 +247,19 @@ Each has duplicated login flow, CSRF handling, session management, and error han
 **Difficulty:** Medium
 **Estimate:** ~4-6 hours
 
-### Background
-The current `OutletGrid` component shows a simple grid of outlet names with ON/OFF indicators. With Issues 1, 2, 7 done, per-outlet power data (watts, amps), device grouping, and outlet type are all available in the API — but the frontend ignores them.
-
 ### Prerequisites (all ✅)
 - ⚡ Issue 1 — Power Monitoring ✅ (v0.1.1)
 - 🏷️ Issue 2 — Device Grouping ✅ (v0.1.2)
 - 🔌 Issue 7 — Outlet Type ✅ (v0.1.2)
 
 ### What Needs to Change
-
-**File: `cloud/web/src/components/OutletGrid.tsx`**
-1. Add a detail panel or expandable row showing:
-   - Current wattage
-   - Current amperage
-   - Device group (EB832_1, EB832_2, etc.)
-   - Outlet type (Variable, Switch, Pump)
-2. Group outlets by device in the grid layout
-3. Show power usage summary (total watts per EnergyBar)
-4. Add power monitoring toggle (show/hide power columns)
+Add expandable outlet detail panel showing wattage, amperage, device group, outlet type, grouped by device with power usage summary.
 
 ---
 
 ## Issue 13: Frontend Enhancement — Water Test History Charts
 
 **✅ DELIVERED v0.1.1 (June 23, 2026)**
-
-**What was implemented:**
-- `TimeSeriesChart` component imported and used in WaterTestPage
-- Each parameter card (KH, Ca, Mg, NO3, PO4) shows a small inline trend chart
-- Y-axis auto-scale (`scale: true`) ensures small fluctuations are visible
-- Charts query from `GET /api/telemetry/water-tests` endpoint
 
 ---
 
@@ -318,10 +268,8 @@ The current `OutletGrid` component shows a simple grid of outlet names with ON/O
 **✅ DELIVERED v0.1.2 (June 23, 2026)**
 
 **What was implemented:**
-- Added `apex_id` tag to all 5 InfluxDB measurements: `apex_telemetry`, `apex_outlet_states`, `apex_power`, `apex_water_tests`, `apex_logs`
+- `apex_id` tag added to all 5 InfluxDB measurements
 - Collector passes `fusion_apex_id` through to every write function
-- `query_water_tests()` supports optional `apex_id` filter parameter
-- Backward compatible — all functions accept `apex_id=""` as default
 - Enables multi-controller filtering (Issue #8)
 
 ---
@@ -336,22 +284,54 @@ The current `OutletGrid` component shows a simple grid of outlet names with ON/O
 **Estimate:** ~6-8 hours
 
 ### Background
-Outlet states are stored in InfluxDB as a time-series with a field `state` (0 or 1). The frontend only shows current states. A timeline view showing WHEN an outlet changed state over the last 24h would help with troubleshooting equipment.
+Outlet states stored in InfluxDB as time-series. A timeline view showing WHEN an outlet changed state would help with troubleshooting.
 
 ### What Needs to Change
+Add timeline toggle per outlet with InfluxDB state-change detection query.
 
-**File: `cloud/web/src/components/OutletGrid.tsx`** or new component `OutletTimeline.tsx`**
-1. Add a timeline toggle per outlet
-2. Query `apex_outlet_states` with a state-change detection query
-3. Show a horizontal bar: green = on, gray = off, over 24h window
-4. Highlight state transitions with timestamps
+---
 
-**InfluxDB query pattern:**
-```flux
-from(bucket: "reefmind_{tenant_id}")
-  |> range(start: -24h)
-  |> filter(fn: (r) => r._measurement == "apex_outlet_states" and r.outlet_name == "Return_Pump")
-  |> filter(fn: (r) => r._field == "state")
-  |> difference()
-  |> filter(fn: (r) => r._value != 0)  // only state changes
-```
+## v0.1.3 — New Items: Full Notes Backfill
+
+The following items were delivered in v0.1.3 (not in the original 15-issue backlog):
+
+### Notes Backfill (18 Months)
+**Status:** ✅ Delivered v0.1.3
+
+Monthly-chunked backfill pulls notes from Fusion API across 18 monthly windows (30–540 days back), deduplicates by `note_id`, and writes via InfluxDB HTTP API to bypass stale Python client connection pool.
+
+### Historical Probe Backfill (90 Days)
+**Status:** ✅ Delivered v0.1.3
+
+Extended from 7-day default to 90-day chunked backfill using Fusion `/logs` endpoint with 7-day windows. Configurable via `backfill_days` in tenant `config_json`.
+
+### Nemo AI Context Enrichment
+**Status:** ✅ Delivered v0.1.3
+
+Injected full water test history (365d), probe trends (24h/7d/30d/90d), and recent notes into Nemo system prompt for personalized advice.
+
+---
+
+## v0.1.4 — New Items: Notes History & Nemo Insights
+
+The following items were delivered in v0.1.4:
+
+### Notes Month/Week Filter Page
+**Status:** ✅ Delivered v0.1.4 — Frontend
+
+Filter bar on Tank Notes page with time presets (All, 1Y, 6M, 3M, This Month, This Week), month-jump dropdown, and month-grouped display with counts.
+
+### 730d Notes History (API)
+**Status:** ✅ Delivered v0.1.4 — API
+
+Default `query_notes()` duration extended to 730d (24 months). 100-note limit removed so all notes in range are returned.
+
+### Nemo Notes Insights
+**Status:** ✅ Delivered v0.1.4 — Nemo
+
+Nemo now receives 2 years / 50 notes with full comment text. Can answer questions like "what corals did I buy this year" or "show me all maintenance in January".
+
+### Empty Note Titles Fix
+**Status:** ✅ Delivered v0.1.4 — Bugfix
+
+Notes with empty titles (e.g. Maintenance/Changed Media with no manual title) caused InfluxDB HTTP 400 on line protocol writes. Fixed by resolving via `REASON_TITLES` mapping.
