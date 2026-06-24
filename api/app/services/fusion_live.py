@@ -224,6 +224,21 @@ class FusionLiveClient:
 
         return history
 
+    def get_logs_ilog(self, apex_id: str, date_str: str, days: int = 7) -> list[dict]:
+        """Fetch one 7-day chunk of historical probe data using the /logs endpoint.
+
+        Args:
+            apex_id: Fusion device ID
+            date_str: ISO date string with -05:00 timezone (e.g. '2026-06-01T00:00:00.000-05:00')
+            days: Number of days to look back from date_str (default 7, max safe ~7)
+
+        Returns: List of ilog items [{date, inputs: [{did, value}]}] from that window.
+        """
+        url = f"/api/apex/{apex_id}/logs?names[]=ilog&days={days}&date={date_str}"
+        resp = self._get(url)
+        data = resp.json()
+        return data.get("ilog", {}).get("items", [])
+
     def get_all_outlet_states(self, apex_id: str) -> list[dict]:
         """Fetch current outlet states from Fusion."""
         detail = self._get(f"/api/apex/{apex_id}").json()

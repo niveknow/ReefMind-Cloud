@@ -8,7 +8,7 @@ for all tenants with Fusion configured.
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import text
 from app.database import engine
@@ -299,46 +299,69 @@ def _collect_tenant(tcfg: dict) -> dict:
                 pass
 
             if not backfill_done:
-                log.info("Tenant %s: running historical backfill (ilog, %d days)...", tenant_id[:8], backfill_days)
-                backfill_probe_dids = [inp.get("did", "") for inp in config_inputs
-                                      if inp.get("did", "").startswith(("base_", "Tmp", "pH", "ORP", "Sal"))]
+                log.info("Tenant %s: running historical backfill (chunked logs, %d days)...", tenant_id[:8], backfill_days)
+                
+                now_cst = datetime.now(timezone(timedelta(hours=-5)))
+                max_chunks = max(1, backfill_days // 7)
                 backfill_points = []
-                for probe_did in backfill_probe_dids:
+                
+                # Fetch fresh data from live poll already in detail, so start from 7 days ago
+                for chunk_idx in range(max_chunks):
+                    offset = chunk_idx + 1
+                    chunk_end = now_cst - timedelta(days=offset * 7)
+                    date_str = chunk_end.strftime("%Y-%m-%dT%H:%M:%S.") + f"{chunk_end.microsecond // 1000:03d}-05:00"
+                    
                     try:
-                        capped_days = min(backfill_days, 7)
-                        ilog = client._get(f"/api/apex/{apex_id}/ilog?days={capped_days}").json()
-                        items = ilog if isinstance(ilog, list) else ilog.get("ilog", ilog.get("items", []))
+                        items = client.get_logs_ilog(apex_id, date_str, days=7)
+                        if not items:
+                            log.info("Tenant %s: no more ilog data at offset %d, stopping", tenant_id[:8], offset)
+                            break
+                        
+                        # Process items
                         for item in items:
                             entry_time = item.get("date", "")
                             inputs = item.get("inputs", [])
                             for inp in inputs:
-                                if inp.get("did") == probe_did:
-                                    cfg = config_map.get(probe_did, {})
-                                    ptype = cfg.get("type", "Unknown")
-                                    try:
-                                        val = float(inp.get("value", 0))
-                                    except (ValueError, TypeError):
-                                        continue
-                                    backfill_points.append({
-                                        "did": probe_did,
-                                        "probe_name": DISPLAY_NAMES.get(probe_did, cfg.get("name", probe_did)),
-                                        "probe_type": ptype,
-                                        "unit": PROBE_UNITS.get(ptype, "raw"),
-                                        "value": val,
-                                        "timestamp": entry_time,
-                                    })
-                                    break
+                                did = inp.get("did")
+                                if did not in config_map: continue
+                                
+                                cfg = config_map.get(did, {})
+                                ptype = cfg.get("type", "Unknown")
+                                
+                                # Probe filtering logic
+                                if did.startswith("Tmp"): ptype = "Temp"
+                                elif did.startswith("pH"): ptype = "pH"
+                                elif did.startswith("ORP"): ptype = "ORP"
+                                elif did.startswith("Sal"): ptype = "Salinity"
+                                elif did.startswith("base_Cond"): ptype = "Cond"
+                                
+                                if ptype not in {"Temp", "pH", "ORP", "Cond", "Salinity"}: continue
+                                
+                                try:
+                                    val = float(inp.get("value", 0))
+                                except (ValueError, TypeError):
+                                    continue
+                                    
+                                backfill_points.append({
+                                    "did": did,
+                                    "probe_name": DISPLAY_NAMES.get(did, cfg.get("name", did)),
+                                    "probe_type": ptype,
+                                    "unit": PROBE_UNITS.get(ptype, "raw"),
+                                    "value": val,
+                                    "timestamp": entry_time,
+                                })
+                                
                     except Exception as e:
-                        log.warning("Tenant %s: ilog backfill failed for %s: %s", tenant_id[:8], probe_did, e)
+                        log.warning("Tenant %s: ilog chunk %d failed: %s", tenant_id[:8], chunk_idx, e)
+                        break
 
                 if backfill_points:
                     count = write_telemetry(tenant_id, backfill_points, apex_id=apex_id)
                     log.info("Tenant %s: backfilled %d historical probe points", tenant_id[:8], count)
-
-                    # Mark backfill as complete in config_json (only on success)
+                    
+                    # Mark backfill complete
                     try:
                         import asyncio
-
                         async def _mark_backfill():
                             async with engine.begin() as conn:
                                 import uuid
@@ -353,8 +376,7 @@ def _collect_tenant(tcfg: dict) -> dict:
                                         WHERE tenant_id = :tid"""),
                                     {"tid": tid}
                                 )
-
-                        task = asyncio.create_task(_mark_backfill())
+                        asyncio.create_task(_mark_backfill())
                     except Exception as e:
                         log.warning("Tenant %s: failed to mark backfill complete: %s", tenant_id[:8], e)
                 else:
