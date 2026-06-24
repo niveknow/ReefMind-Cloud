@@ -287,13 +287,11 @@ def _collect_tenant(tcfg: dict) -> dict:
                     # Backfill: iterate through monthly windows (API returns ~30d per call)
                     today = datetime.now(timezone.utc)
                     all_notes: list[dict] = []
-                    for offset in range(30, 400, 30):
+                    for offset in range(30, 540, 30):  # up to ~18 months
                         try:
                             chunk = client.get_all_notes(apex_id, days=offset)
                             if chunk:
                                 all_notes.extend(chunk)
-                            else:
-                                break
                         except Exception:
                             break
                     # Deduplicate by note_id
