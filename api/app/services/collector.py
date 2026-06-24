@@ -277,11 +277,38 @@ def _collect_tenant(tcfg: dict) -> dict:
         if "notes" in enabled:
             log.info("Tenant %s: fetching notes...", tenant_id[:8])
             try:
-                notes_data = client.get_all_notes(apex_id, days=30)
+                # Check if notes backfill is complete
+                meta = {}
+                if config_json_raw and config_json_raw != "{}":
+                    meta = json.loads(config_json_raw) if isinstance(config_json_raw, str) else {}
+                notes_backfill_done = meta.get("notes_backfill_complete", False)
+                
+                notes_days = 365 if not notes_backfill_done else 30
+                notes_data = client.get_all_notes(apex_id, days=notes_days)
                 if notes_data:
                     count = write_notes(tenant_id, notes_data, apex_id=apex_id)
                     result["notes"] = count
-                    log.info("Tenant %s: wrote %d notes", tenant_id[:8], count)
+                    log.info("Tenant %s: wrote %d notes (%s)", tenant_id[:8], count, 
+                             "backfill" if not notes_backfill_done else "update")
+                    
+                    # Mark backfill complete on first successful write
+                    if not notes_backfill_done:
+                        async def _mark_notes_backfill():
+                            async with engine.begin() as conn:
+                                import uuid
+                                tid = uuid.UUID(tenant_id)
+                                await conn.execute(
+                                    text("""UPDATE tenant_configs
+                                        SET config_json = jsonb_set(
+                                            COALESCE(config_json::jsonb, '{}'::jsonb),
+                                            '{notes_backfill_complete}',
+                                            'true'::jsonb
+                                        )
+                                        WHERE tenant_id = :tid"""),
+                                    {"tid": tid}
+                                )
+                        import asyncio
+                        asyncio.create_task(_mark_notes_backfill())
                 else:
                     log.info("Tenant %s: no notes returned", tenant_id[:8])
             except Exception as e:
