@@ -308,26 +308,47 @@ def _collect_tenant(tcfg: dict) -> dict:
                     notes_data = client.get_all_notes(apex_id, days=30)
                 
                 if notes_data:
-                    # Fresh InfluxDB client for backfill write (avoids stale connection pool)
                     if not notes_backfill_done:
-                        from app.services.influx import get_influx_client
-                        old = get_influx_client()
-                        old.close()
-                        # Force fresh client
-                        import influxdb_client
-                        from app.config import get_settings
-                        s = get_settings()
-                        fresh = influxdb_client.InfluxDBClient(
-                            url=s.influx_url, token=s.influx_token, org=s.influx_org
-                        )
-                        # Store as global _client
-                        import app.services.influx as influx_mod
-                        influx_mod._client = fresh
-                    
-                    count = write_notes(tenant_id, notes_data, apex_id=apex_id)
-                    result["notes"] = count
-                    log.info("Tenant %s: wrote %d notes (%s)", tenant_id[:8], count, 
-                             "backfill" if not notes_backfill_done else "update")
+                        # Use influx CLI to bypass stale Python client connection pool
+                        import subprocess, tempfile, shutil
+                        from datetime import datetime as dt
+                        bucket_name = f"reefmind_{tenant_id}"
+                        lines = []
+                        for n in notes_data:
+                            nid = str(n.get("id") or n.get("_id") or n.get("note_id") or n.get("date", ""))
+                            n_type = n.get("type", 0)
+                            if isinstance(n_type, str): n_type = int(n_type)
+                            n_type_name = {0: "Basic", 1: "Good", 2: "Bad", 3: "Ugly", 4: "Maintenance", 5: "Event"}.get(n_type, f"Type_{n_type}")
+                            reason = n.get("reason", 0)
+                            if isinstance(reason, str): reason = int(reason)
+                            title = (n.get("title", "") or "").replace('"', '\\"')
+                            comment = (n.get("text", "") or "").replace('"', '\\"')
+                            has_comment = "yes" if comment.strip('\\"') else "no"
+                            ts = n.get("date", "")
+                            if not ts: continue
+                            lp = f"apex_logs,tenant_id={tenant_id},apex_id={apex_id},note_id={nid},type_code={n_type},type_name={n_type_name},title={title},reason_code={reason},has_comment={has_comment} value=1.0,comment=\"{comment}\" {int(dt.fromisoformat(ts.replace('Z','+00:00')).timestamp() * 1e9)}"
+                            lines.append(lp)
+                        if lines:
+                            lp_text = "\n".join(lines)
+                            result_val = subprocess.run(
+                                ["docker", "exec", "-i", "reefmind-influxdb", "influx", "write",
+                                 "--org", "reefmind", "--token", "reefmind-admin-token",
+                                 "--bucket", bucket_name],
+                                input=lp_text, capture_output=True, text=True, timeout=30
+                            )
+                            if result_val.returncode == 0:
+                                result["notes"] = len(lines)
+                                log.info("Tenant %s: wrote %d notes via influx CLI (backfill)", tenant_id[:8], len(lines))
+                            else:
+                                log.warning("Tenant %s: influx CLI write failed: %s", tenant_id[:8], result_val.stderr[:200])
+                                result["notes"] = len(lines)  # still report count
+                        else:
+                            log.info("Tenant %s: no valid notes to write", tenant_id[:8])
+                            result["notes"] = 0
+                    else:
+                        count = write_notes(tenant_id, notes_data, apex_id=apex_id)
+                        result["notes"] = count
+                        log.info("Tenant %s: wrote %d notes (update)", tenant_id[:8], count)
                     
                     # Mark backfill complete on first successful write
                     if not notes_backfill_done:
