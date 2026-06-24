@@ -163,7 +163,7 @@ def query_outlets(tenant_id: str) -> list:
 
     query = f"""\
     from(bucket: "{bucket}")
-      |> range(start: -30m)
+      |> range(start: -6h)
       |> filter(fn: (r) => r["_measurement"] == "apex_outlet_states")
       |> filter(fn: (r) => r["_field"] == "state")
       |> last()
