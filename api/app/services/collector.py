@@ -309,11 +309,11 @@ def _collect_tenant(tcfg: dict) -> dict:
                 
                 if notes_data:
                     if not notes_backfill_done:
-                        # Write notes via InfluxDB HTTP API (no docker CLI needed)
                         import httpx as _httpx
                         from app.config import get_settings as _get_settings
                         _s = _get_settings()
                         bucket_name = f"reefmind_{tenant_id}"
+                        log.info("Tenant %s: writing %d notes via HTTP API to bucket %s", tenant_id[:8], len(notes_data), bucket_name)
                         lines = []
                         for n in notes_data:
                             nid = str(n.get("id") or n.get("_id") or n.get("note_id") or n.get("date", ""))
