@@ -20,6 +20,7 @@ from app.models.tenant import TenantConfig
 from app.middleware.auth import get_current_user
 from app.config import get_settings
 from app.services.fusion_live import FusionLiveClient, FusionLiveError
+from app.services.influx import query_water_tests, query_notes, query_telemetry
 
 router = APIRouter(prefix="/api/nemo", tags=["nemo"])
 
@@ -131,7 +132,7 @@ def _build_setup_context(config: TenantConfig) -> str:
 
 
 def _build_live_context(config: TenantConfig) -> str:
-    """Fetch live readings from Fusion, build concise context string.
+    """Fetch live readings from Fusion and historical data from InfluxDB.
 
     Cached for TANK_CACHE_TTL seconds.
     """
@@ -143,14 +144,14 @@ def _build_live_context(config: TenantConfig) -> str:
     if key in _tank_cache and now - _tank_cache[key][0] < TANK_CACHE_TTL:
         return _tank_cache[key][1]
 
+    parts = []
+
     try:
         client = FusionLiveClient(config.fusion_user, config.fusion_pass)
         client.login()
         readings = client.get_live_readings(config.fusion_apex_id)
         outlets = client.get_all_outlet_states(config.fusion_apex_id)
         client.close()
-
-        parts = []
 
         # Probe readings — always short (4-5 lines)
         if readings:
@@ -176,16 +177,72 @@ def _build_live_context(config: TenantConfig) -> str:
                     summary += f" +{len(key_names)-8} more"
             parts.append(summary)
 
-        context = " | ".join(parts)
-
-        # Cache it
-        _tank_cache[key] = (now, context)
-        return context
-
     except (FusionLiveError, Exception) as e:
-        err_msg = f"(data unavailable: {e})"
-        _tank_cache[key] = (now, err_msg)
-        return err_msg
+        parts.append(f"(live data unavailable: {e})")
+
+    # ---- InfluxDB historical data (compact, always included) ----
+    tenant_id = str(config.tenant_id)
+
+    # Water tests — latest per parameter
+    try:
+        wt = query_water_tests(tenant_id, duration="365d")
+        if wt:
+            latest: dict[str, dict] = {}
+            for r in wt:
+                param = r["parameter"]
+                if param not in latest or r["time"] > latest[param]["time"]:
+                    latest[param] = r
+            wt_str = ", ".join(
+                f"{p}={v['value']}{v['unit']}" for p, v in sorted(latest.items())
+            )
+            parts.append(f"Water tests: {wt_str}")
+    except Exception:
+        pass  # non-fatal
+
+    # Notes — last 10
+    try:
+        notes = query_notes(tenant_id, duration="90d", limit=10)
+        if notes:
+            note_lines = []
+            for n in notes:
+                tname = n.get("type_name", "")
+                emoji = {"Event": "📌", "Maintenance": "🔧", "Good": "✅",
+                         "Bad": "⚠️", "Ugly": "🚨"}.get(tname, "📝")
+                title = n.get("title", "(untitled)")
+                note_lines.append(f"{emoji} {title}")
+            parts.append("Recent notes: " + " | ".join(note_lines))
+    except Exception:
+        pass
+
+    # Probe history — 24h min/max/avg per probe
+    try:
+        all_data = query_telemetry(tenant_id, duration="24h")
+        if all_data:
+            from collections import defaultdict
+            probe_stats: dict[str, dict] = defaultdict(lambda: {"values": [], "unit": ""})
+            for r in all_data:
+                name = r.get("probe_name", "")
+                if name:
+                    probe_stats[name]["values"].append(r.get("value", 0))
+                    probe_stats[name]["unit"] = r.get("unit", "")
+
+            stat_lines = []
+            for name, data in sorted(probe_stats.items()):
+                vals = data["values"]
+                unit = data["unit"]
+                if vals:
+                    mn, mx, avg = min(vals), max(vals), round(sum(vals) / len(vals), 2)
+                    stat_lines.append(f"{name} {mn}-{mx} ({avg} avg){unit}")
+            if stat_lines:
+                parts.append("24h trends: " + "; ".join(stat_lines))
+    except Exception:
+        pass
+
+    context = " | ".join(parts)
+
+    # Cache it
+    _tank_cache[key] = (now, context)
+    return context
 
 
 # ---------------------------------------------------------------------------
@@ -270,11 +327,10 @@ async def ask_nemo(
         if setup_info:
             tank_context_parts.append(setup_info)
 
-        # Live data — only if question is about the tank
-        if _question_needs_tank_data(req.question, config):
-            live_data = _build_live_context(config)
-            if live_data:
-                tank_context_parts.append(live_data)
+        # Tank data — always included (live + InfluxDB water tests, notes, trends)
+        live_data = _build_live_context(config)
+        if live_data:
+            tank_context_parts.append(live_data)
 
     if tank_context_parts:
         full_prompt = f"{NEMO_SYSTEM_PROMPT}\n\nTANK DATA\n{'─' * 40}\n" + "\n".join(tank_context_parts)
