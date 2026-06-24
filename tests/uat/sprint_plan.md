@@ -27,7 +27,7 @@ v0.1.0 — Initial Build (commit b541f3e)
 - **Preconditions:** API container running on port 8000
 - **Steps:**
   1. Send `GET /api/health`
-- **Expected result:** Returns `{"status": "ok", "service": "reefmind-api", "version": "0.1.1"}` with HTTP 200
+- **Expected result:** Returns `{"status": "ok", "service": "reefmind-api", "version": "0.1.3"}` with HTTP 200
 - **Status:** [PENDING]
 - **Evidence:**
 - **Notes:** Smoke test — must pass before any other testing
