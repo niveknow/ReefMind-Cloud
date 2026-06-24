@@ -134,8 +134,10 @@ def query_telemetry(tenant_id: str, probe_name: str = "", duration: str = "24h")
       |> range(start: -{duration})
       |> filter(fn: (r) => r["_measurement"] == "apex_telemetry")
       {where_clause}
-      |> sort(columns: ["_time"], desc: false)
-      |> yield(name: "results")
+      |> aggregateWindow(every: 5m, fn: mean, createEmpty: false)
+      |> group()
+      |> sort(columns: ["_time"])
+      |> yield(name: "mean")
     """
 
     tables = query_api.query(query)
