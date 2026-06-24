@@ -309,9 +309,10 @@ def _collect_tenant(tcfg: dict) -> dict:
                 
                 if notes_data:
                     if not notes_backfill_done:
-                        # Use influx CLI to bypass stale Python client connection pool
-                        import subprocess, tempfile, shutil
-                        from datetime import datetime as dt
+                        # Write notes via InfluxDB HTTP API (no docker CLI needed)
+                        import httpx as _httpx
+                        from app.config import get_settings as _get_settings
+                        _s = _get_settings()
                         bucket_name = f"reefmind_{tenant_id}"
                         lines = []
                         for n in notes_data:
@@ -321,30 +322,34 @@ def _collect_tenant(tcfg: dict) -> dict:
                             n_type_name = {0: "Basic", 1: "Good", 2: "Bad", 3: "Ugly", 4: "Maintenance", 5: "Event"}.get(n_type, f"Type_{n_type}")
                             reason = n.get("reason", 0)
                             if isinstance(reason, str): reason = int(reason)
-                            title = (n.get("title", "") or "").replace('"', '\\"')
-                            comment = (n.get("text", "") or "").replace('"', '\\"')
-                            has_comment = "yes" if comment.strip('\\"') else "no"
+                            title_esc = (n.get("title", "") or "").replace('"', '\\"').replace(",", "\\,").replace(" ", "\\ ")
+                            comment_esc = (n.get("text", "") or "").replace('"', '\\"')
                             ts = n.get("date", "")
                             if not ts: continue
-                            lp = f"apex_logs,tenant_id={tenant_id},apex_id={apex_id},note_id={nid},type_code={n_type},type_name={n_type_name},title={title},reason_code={reason},has_comment={has_comment} value=1.0,comment=\"{comment}\" {int(dt.fromisoformat(ts.replace('Z','+00:00')).timestamp() * 1e9)}"
+                            try:
+                                from datetime import datetime as _dt
+                                nano = int(_dt.fromisoformat(ts.replace("Z", "+00:00")).timestamp() * 1e9)
+                            except:
+                                continue
+                            lp = f'apex_logs,tenant_id={tenant_id},apex_id={apex_id},note_id={nid},type_code={n_type},type_name={n_type_name},title={title_esc},reason_code={reason},has_comment={"yes" if n.get("text") else "no"} value=1.0,comment="{comment_esc}" {nano}'
                             lines.append(lp)
                         if lines:
                             lp_text = "\n".join(lines)
-                            result_val = subprocess.run(
-                                ["docker", "exec", "-i", "reefmind-influxdb", "influx", "write",
-                                 "--org", "reefmind", "--token", "reefmind-admin-token",
-                                 "--bucket", bucket_name],
-                                input=lp_text, capture_output=True, text=True, timeout=30
-                            )
-                            if result_val.returncode == 0:
-                                result["notes"] = len(lines)
-                                log.info("Tenant %s: wrote %d notes via influx CLI (backfill)", tenant_id[:8], len(lines))
-                            else:
-                                log.warning("Tenant %s: influx CLI write failed: %s", tenant_id[:8], result_val.stderr[:200])
-                                result["notes"] = len(lines)  # still report count
+                            try:
+                                resp = _httpx.post(
+                                    f"{_s.influx_url}/api/v2/write?org={_s.influx_org}&bucket={bucket_name}&precision=ns",
+                                    headers={"Authorization": f"Token {_s.influx_token}"},
+                                    content=lp_text, timeout=30.0
+                                )
+                                if resp.status_code == 204:
+                                    result["notes"] = len(lines)
+                                    log.info("Tenant %s: wrote %d notes via HTTP API (backfill)", tenant_id[:8], len(lines))
+                                else:
+                                    log.warning("Tenant %s: InfluxDB write HTTP %d: %s", tenant_id[:8], resp.status_code, resp.text[:200])
+                            except Exception as e:
+                                log.warning("Tenant %s: InfluxDB write failed: %s", tenant_id[:8], e)
                         else:
                             log.info("Tenant %s: no valid notes to write", tenant_id[:8])
-                            result["notes"] = 0
                     else:
                         count = write_notes(tenant_id, notes_data, apex_id=apex_id)
                         result["notes"] = count
