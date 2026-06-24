@@ -283,8 +283,32 @@ def _collect_tenant(tcfg: dict) -> dict:
                     meta = json.loads(config_json_raw) if isinstance(config_json_raw, str) else {}
                 notes_backfill_done = meta.get("notes_backfill_complete", False)
                 
-                notes_days = 365 if not notes_backfill_done else 30
-                notes_data = client.get_all_notes(apex_id, days=notes_days)
+                if not notes_backfill_done:
+                    # Backfill: iterate through monthly windows (API returns ~30d per call)
+                    today = datetime.now(timezone.utc)
+                    all_notes: list[dict] = []
+                    for offset in range(30, 400, 30):
+                        try:
+                            chunk = client.get_all_notes(apex_id, days=offset)
+                            if chunk:
+                                all_notes.extend(chunk)
+                            else:
+                                break
+                        except Exception:
+                            break
+                    # Deduplicate by note_id
+                    seen: set[str] = set()
+                    notes_data = []
+                    for n in all_notes:
+                        nid = str(n.get("id") or n.get("_id") or n.get("note_id") or n.get("date", ""))
+                        if nid not in seen:
+                            seen.add(nid)
+                            notes_data.append(n)
+                    log.info("Tenant %s: notes backfill: %d unique from %d raw (12 monthly windows)", 
+                             tenant_id[:8], len(notes_data), len(all_notes))
+                else:
+                    notes_data = client.get_all_notes(apex_id, days=30)
+                
                 if notes_data:
                     count = write_notes(tenant_id, notes_data, apex_id=apex_id)
                     result["notes"] = count
