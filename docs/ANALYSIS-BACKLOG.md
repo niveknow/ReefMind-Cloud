@@ -25,17 +25,21 @@
 | 13 | 📊 Water Test Charts | ✅ **Delivered** | v0.1.1 | Frontend |
 | 14 | 🏷️ Controller ID Tag | ✅ **Delivered** | v0.1.2 | Schema |
 | 15 | 📊 Outlet State Timeline | 📋 P2 — Open | — | Frontend |
+| — | 🐛 Route Ordering Fix | ✅ **Delivered** | v0.1.2 | Bugfix |
+| — | 🐛 Duration Button Fix | ✅ **Delivered** | v0.1.2 | Bugfix |
+| — | 📄 Fusion API Limits Doc | ✅ **Delivered** | v0.1.2 | Docs |
 
 ### Currently Collected (by `cloud/api/app/services/collector.py`)
 
 | Data | Measurement | Tags | Fields | Interval |
 |------|------------|------|--------|----------|
-| Probe readings | `apex_telemetry` | tenant_id, apex_id, probe_name, probe_type, unit, did | value (float) | 5min |
+| Probe readings | `apex_telemetry` | tenant_id, apex_id, probe_name, probe_type, unit, did | value (float) | 5min (7-day ilog backfill on first poll) |
 | Outlet ON/OFF | `apex_outlet_states` | tenant_id, apex_id, outlet_name, outlet_type, device_id, device_group | state (0/1), state_display | 5min |
 | Power (Watts/Amps) | `apex_power` | tenant_id, apex_id, outlet_name, channel | watts, amps | 5min |
 | Water tests | `apex_water_tests` | tenant_id, apex_id, parameter, unit | value (float) | 5min (atomic replace) |
 | Tank notes | `apex_logs` | tenant_id, apex_id, note_id, type_code, type_name, title, reason_code, has_comment | value, comment | 5min (atomic replace) |
 | Controller info | `apex_controller_info` | tenant_id, apex_id, serial | hardware, software, timezone, name | 5min (atomic replace) |
+| Fusion API limits | — | See §Fusion API Historical Data Limits below | — | — |
 
 ### Available from Fusion But NOT Collected
 
@@ -58,6 +62,24 @@
 - **#15 (Outlet Timeline)** — ~6-8 hr. Big UI effort, nice-to-have.
 - **#8 (Multi-Controller)** — ~3-5 hr. Depends on #14 (done). Low unless user has multiple Apex units.
 - **#9 (Client Consolidation)** — ~3-4 hr. Pure code health, no user-facing change.
+
+---
+
+---
+
+## Fusion API Historical Data Limits
+
+The Fusion API caps historical data differently depending on the data type. These limits affect how much history is available when a new tenant connects or when the collector restarts.
+
+| Data | Fusion Endpoint | Max History | Collector Behavior | Configurable |
+|------|----------------|-------------|-------------------|-------------|
+| **Probe readings** | `/api/apex/{id}/ilog?days=N` | **7 days** (backfill) | One-time backfill on first poll via `BACKFILL_DAYS=7`; thereafter only live snapshots every 5min | Yes — `BACKFILL_DAYS` in `collector.py` |
+| **Water tests** | `/api/apex/{id}/mlog?days=N` | **365 days** | Atomic re-sync every 5min cycle | Yes — `days=365` in `get_mlog()` |
+| **Tank notes** | `/api/apex/{id}/log` (paginated) | **30 days** | Atomic re-sync every 5min cycle | Yes — `days=30` in `get_all_notes()` |
+| **Controller info** | `/api/apex/{id}` | Current state only | Written every 5min cycle | N/A |
+| **Outlet states** | `/api/apex/{id}` | Current state only | Written every 5min cycle | N/A |
+
+**Note:** The ilog (probe history) limit of 7 days is our default, not a Fusion API hard limit. The Fusion ilog endpoint accepts higher `days` values, but we chose 7 to balance data density against API load during the initial backfill. Increase `BACKFILL_DAYS` in `collector.py` and reset `backfill_complete` in the tenant's `config_json` to pull deeper history.
 
 ---
 

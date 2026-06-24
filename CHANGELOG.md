@@ -1,5 +1,33 @@
 # Changelog
 
+# Changelog
+
+## v0.1.2 — Bug Fix Release (2026-06-24)
+
+**Bug fix and stability release for the ReefMind Cloud SaaS platform.**
+
+### 🐛 Bug Fixes
+
+- **Route ordering** — Moved specific routes (`/notes`, `/water-tests`, `/controller`) before the wildcard `/{probe_name}` route so they resolve correctly instead of returning empty probe data
+- **Controller info extraction** — Fixed `get_controller_info()` to extract serial/hardware/software from the Fusion API response top-level keys, not from a non-existent nested `"controller"` key
+- **Collector logging** — Added dedicated StreamHandler to the collector logger so INFO-level poll cycle messages are visible (previously swallowed by root WARNING level)
+- **Outlet query window** — Expanded `query_outlets()` time range from 30m to 6h to find data across container restarts
+- **Duration button reload** — Added `duration` to React `useEffect` dependency arrays in `DashboardPage.tsx` so 1h/6h/24h chart buttons actually reload data when clicked
+- **Outlet data for 020fe3d2 tenant** — Enabled `outlets` in data areas via SQL update so the collector writes outlet states
+
+### 📦 Data & Collector
+
+- **Historical probe backfill** — Reset backfill flag and triggered 7-day ilog backfill, importing 5,684 historical probe data points
+- **Stale data cleanup** — Removed probe telemetry from old container run to prevent chart gaps when viewing 24h range
+- **Collector now at INFO level** — All poll cycles, tenant activity, and data counts visible in container logs
+
+### 📚 Documentation
+
+- Added **Fusion API historical data limits** to the data-collection tables in ANALYSIS-BACKLOG.md:
+  - Probes (ilog): 7 days backfill (configurable via `BACKFILL_DAYS`), then live snapshots every 5min
+  - Water tests (mlog): 365 days, re-synced every 5min
+  - Tank notes: 30 days, re-synced every 5min
+
 ## v0.1.0 — Initial Build (2026-06-21)
 
 **First release of ReefMind Cloud — the SaaS platform for Neptune Apex aquarium management.**

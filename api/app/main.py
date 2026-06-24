@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="ReefMind SaaS API",
     description="Cloud API for ReefMind reef aquarium monitoring",
-    version="0.1.1",
+    version="0.1.2",
     lifespan=lifespan,
 )
 
@@ -53,7 +53,7 @@ app.add_middleware(
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "reefmind-api", "version": "0.1.1"}
+    return {"status": "ok", "service": "reefmind-api", "version": "0.1.2"}
 
 
 # Mount routers
