@@ -357,33 +357,22 @@ def _collect_tenant(tcfg: dict) -> dict:
 
         # --- 7. Controller info (extracted from already-fetched detail) ---
         try:
-            ctrl = detail.get("controller", {}) or {}
             ctrl_info = {
-                "hardware": ctrl.get("hardware", ""),
-                "software": ctrl.get("software", ""),
-                "serial": ctrl.get("serial", ""),
-                "timezone": ctrl.get("timezone", ""),
-                "name": ctrl.get("name", ""),
+                "hardware": detail.get("hardware", ""),
+                "software": detail.get("software", ""),
+                "serial": detail.get("serial", ""),
+                "timezone": detail.get("timezone", ""),
+                "name": detail.get("name", ""),
             }
-            log.info("Tenant %s: controller info from Fusion: serial=%s, hw=%s, sw=%s",
-                     tenant_id[:8], ctrl_info.get("serial","?"), ctrl_info.get("hardware","?"), ctrl_info.get("software","?"))
             if ctrl_info.get("serial"):
                 write_controller_info(tenant_id, ctrl_info, apex_id=apex_id)
                 result["controller_info"] = 1
-                log.info("Tenant %s: wrote controller info (HW: %s, SW: %s)",
-                         tenant_id[:8], ctrl_info.get("hardware", "?"), ctrl_info.get("software", "?"))
+                log.info("Tenant %s: wrote controller info (serial=%s, HW=%s, SW=%s)",
+                         tenant_id[:8], ctrl_info.get("serial", "?"),
+                         ctrl_info.get("hardware", "?"), ctrl_info.get("software", "?"))
             else:
-                # Serial missing — try alternative locations on the detail dict
-                log.info("Tenant %s: controller not under 'controller' key, checking top-level...", tenant_id[:8])
-                for alt_key in ["serial", "hardware", "software", "name"]:
-                    if detail.get(alt_key):
-                        log.info("  Found at top-level: %s = %s", alt_key, detail[alt_key])
-                # Check under detail.get("config", {}) 
-                cfg = detail.get("config", {})
-                if isinstance(cfg, dict):
-                    ctrl2 = cfg.get("controller", {})
-                    if ctrl2:
-                        log.info("  config.controller keys: %s", list(ctrl2.keys()))
+                log.info("Tenant %s: controller info not found in response (no serial field)",
+                         tenant_id[:8])
         except Exception as e:
             log.warning("Tenant %s: controller info extract failed: %s", tenant_id[:8], e)
 
