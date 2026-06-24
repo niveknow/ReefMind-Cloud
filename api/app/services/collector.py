@@ -18,6 +18,12 @@ from app.services.fusion_live import FusionLiveClient, FusionLiveError
 
 log = logging.getLogger("reefmind.collector")
 log.setLevel(logging.INFO)
+if not log.handlers:
+    _ch = logging.StreamHandler()
+    _ch.setLevel(logging.INFO)
+    _ch.setFormatter(logging.Formatter("%(levelname)s:%(name)s: %(message)s"))
+    log.addHandler(_ch)
+    log.propagate = False
 
 POLL_INTERVAL_SECONDS = 300  # 5 minutes
 BACKFILL_DAYS = 7  # Days of ilog history to write on first run
