@@ -17,6 +17,7 @@ from app.services.influx import write_telemetry, write_outlets, write_water_test
 from app.services.fusion_live import FusionLiveClient, FusionLiveError
 
 log = logging.getLogger("reefmind.collector")
+log.setLevel(logging.INFO)
 
 POLL_INTERVAL_SECONDS = 300  # 5 minutes
 BACKFILL_DAYS = 7  # Days of ilog history to write on first run
@@ -92,7 +93,7 @@ def _collect_tenant(tcfg: dict) -> dict:
         needs_detail = bool({"probes", "outlets", "power"} & enabled)
 
         # Initialize shared variables (may be populated below)
-        detail = None
+        detail = {}
         status_inputs = []
         config_inputs = []
         config_map = {}
@@ -348,16 +349,23 @@ def _collect_tenant(tcfg: dict) -> dict:
                 except Exception as e:
                     log.warning("Tenant %s: failed to mark backfill complete: %s", tenant_id[:8], e)
 
-        # --- 7. Controller info ---
+        # --- 7. Controller info (extracted from already-fetched detail) ---
         try:
-            ctrl_info = client.get_controller_info(apex_id)
+            ctrl = detail.get("controller", {}) or {}
+            ctrl_info = {
+                "hardware": ctrl.get("hardware", ""),
+                "software": ctrl.get("software", ""),
+                "serial": ctrl.get("serial", ""),
+                "timezone": ctrl.get("timezone", ""),
+                "name": ctrl.get("name", ""),
+            }
             if ctrl_info.get("serial"):
                 write_controller_info(tenant_id, ctrl_info, apex_id=apex_id)
                 result["controller_info"] = 1
                 log.info("Tenant %s: wrote controller info (HW: %s, SW: %s)",
                          tenant_id[:8], ctrl_info.get("hardware", "?"), ctrl_info.get("software", "?"))
         except Exception as e:
-            log.warning("Tenant %s: controller info fetch failed: %s", tenant_id[:8], e)
+            log.warning("Tenant %s: controller info extract failed: %s", tenant_id[:8], e)
 
         client.close()
 
