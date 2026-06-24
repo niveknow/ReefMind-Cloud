@@ -261,12 +261,62 @@ def query_water_tests(tenant_id: str, parameter: str = "", duration: str = "365d
     return results
 
 # Notes
-NOTE_TYPES = {0: "Basic", 1: "Good", 2: "Bad", 3: "Ugly", 4: "Maintenance", 5: "Event"}
+NOTE_TYPES: dict[int, str] = {0: "Basic", 1: "Good", 2: "Bad", 3: "Ugly", 4: "Maintenance", 5: "Event"}
+
+# Reason code → human-readable title (when API title is empty)
+# Ported from on-prem scripts/apex_notes.py
+REASON_TITLES: dict[tuple[int, int], str] = {
+    (0, 0): "Note",
+    (1, 0): "General",
+    (1, 1): "General",
+    (1, 5): "Recovery",
+    (1, 9): "Added Fish",
+    (1, 10): "Added Coral",
+    (1, 11): "Added Invert/CUC",
+    (1, 12): "Added Equipment",
+    (2, 0): "General",
+    (2, 5): "Disease/Injury",
+    (2, 10): "Coral Issue",
+    (2, 17): "Algae Issue",
+    (3, 0): "Fish Died",
+    (3, 1): "Coral Died",
+    (3, 2): "Invert Died",
+    (4, 0): "Water Change",
+    (4, 1): "Dosed",
+    (4, 2): "General",
+    (4, 3): "Changed Filter / Socks",
+    (4, 4): "Added Sand",
+    (4, 7): "Cleaned Pump",
+    (4, 8): "Changed Carbon",
+    (4, 9): "Changed Media",
+    (4, 10): "Bio-Pellets",
+    (4, 11): "Cleaned Glass",
+    (4, 12): "Adjusted Equipment",
+    (4, 13): "Feeding",
+    (5, 0): "General",
+}
+
+
+def _resolve_note_id(note: dict) -> str | None:
+    """Try multiple field names Fusion may use for the note ID.
+    Returns the ID string or None if not found.
+    """
+    for key in ("id", "note_id", "_id", "ID"):
+        val = note.get(key)
+        if val is not None:
+            return str(val)
+    return None
 
 def write_notes(tenant_id: str, notes: list[dict], bucket_name: str = "", apex_id: str = "") -> int:
     """Write tank notes to InfluxDB as apex_logs measurement.
     Performs atomic replace: deletes existing apex_logs measurement first.
+    
+    Uses _resolve_note_id() to handle multiple Fusion API field name
+    conventions, and falls back to REASON_TITLES when the note title is empty.
+    Ported from on-prem scripts/apex_notes.py note_to_points().
     """
+    from datetime import datetime, timezone
+
     bucket = bucket_name or ensure_tenant_bucket(tenant_id)
     client = get_influx_client()
 
@@ -281,23 +331,67 @@ def write_notes(tenant_id: str, notes: list[dict], bucket_name: str = "", apex_i
     write_api = client.write_api(write_type=SYNCHRONOUS)
     points = []
     for n in notes:
+        nid = _resolve_note_id(n)
+        if nid is None:
+            log.warning("write_notes: skipping note with no ID (title=%s)", n.get("title", "(none)"))
+            continue
+
+        # Parse timestamp — Fusion stores UTC
+        date_iso = n.get("date", "")
+        if not isinstance(date_iso, str) or not date_iso:
+            log.warning("write_notes: skipping note %s with no date", nid)
+            continue
+        try:
+            ts = datetime.fromisoformat(date_iso.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            log.warning("write_notes: skipping note %s with unparseable date: %s", nid, date_iso)
+            continue
+
         n_type = n.get("type", 0)
-        n_type_name = NOTE_TYPES.get(n_type, "Basic")
+        if isinstance(n_type, str):
+            try:
+                n_type = int(n_type)
+            except (ValueError, TypeError):
+                n_type = 0
+        n_type_name = NOTE_TYPES.get(n_type, f"Type_{n_type}")
+
+        # Title — fall back to reason title when empty
+        title = n.get("title", "")
+        if not title:
+            reason_code = n.get("reason", 0)
+            if isinstance(reason_code, str):
+                try:
+                    reason_code = int(reason_code)
+                except (ValueError, TypeError):
+                    reason_code = 0
+            title = REASON_TITLES.get((n_type, reason_code), n_type_name)
+        else:
+            reason_code = n.get("reason", 0)
+
+        if isinstance(reason_code, str):
+            try:
+                reason_code = int(reason_code)
+            except (ValueError, TypeError):
+                reason_code = 0
+
+        comment = n.get("text", "") or ""
+        if not comment.strip():
+            comment = ""
+        has_comment = "yes" if comment.strip() else "no"
 
         point = Point("apex_logs") \
             .tag("tenant_id", tenant_id) \
             .tag("apex_id", apex_id) \
-            .tag("note_id", str(n.get("id", ""))) \
+            .tag("note_id", nid) \
             .tag("type_code", str(n_type)) \
             .tag("type_name", n_type_name) \
-            .tag("title", n.get("title", "")) \
-            .tag("reason_code", str(n.get("reason", 0))) \
-            .tag("has_comment", "true" if n.get("text") else "false") \
+            .tag("title", title) \
+            .tag("reason_code", str(reason_code)) \
+            .tag("has_comment", has_comment) \
             .field("value", 1.0) \
-            .field("comment", n.get("text", ""))
+            .field("comment", comment) \
+            .time(ts)
 
-        if n.get("date"):
-            point.time(n["date"])
         points.append(point)
 
     if points:
@@ -338,7 +432,7 @@ def query_notes(tenant_id: str, duration: str = "365d", limit: int = 100) -> lis
                     "type_name": record.values.get("type_name", ""),
                     "title": record.values.get("title", ""),
                     "reason_code": record.values.get("reason_code", ""),
-                    "has_comment": record.values.get("has_comment", "false") == "true",
+                    "has_comment": record.values.get("has_comment", "no") == "yes",
                     "comment": "",
                 }
 
