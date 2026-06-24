@@ -26,7 +26,7 @@ if not log.handlers:
     log.propagate = False
 
 POLL_INTERVAL_SECONDS = 300  # 5 minutes
-BACKFILL_DAYS = 7  # Days of ilog history to write on first run
+# backfill_days is now read from tenant config_json; removed hardcoded constant
 
 # All available data areas for user selection
 ALL_AREAS = ["probes", "outlets", "water_tests", "notes", "power", "trident"]
@@ -290,20 +290,23 @@ def _collect_tenant(tcfg: dict) -> dict:
         # --- 6. Historical backfill (first poll only) ---
         if "probes" in enabled:
             backfill_done = False
+            backfill_days = 7
             try:
                 meta = json.loads(config_json_raw) if isinstance(config_json_raw, str) else {}
                 backfill_done = meta.get("backfill_complete", False)
+                backfill_days = meta.get("backfill_days", 7)
             except (json.JSONDecodeError, TypeError):
                 pass
 
             if not backfill_done:
-                log.info("Tenant %s: running historical backfill (ilog, %d days)...", tenant_id[:8], BACKFILL_DAYS)
+                log.info("Tenant %s: running historical backfill (ilog, %d days)...", tenant_id[:8], backfill_days)
                 backfill_probe_dids = [inp.get("did", "") for inp in config_inputs
                                       if inp.get("did", "").startswith(("base_", "Tmp", "pH", "ORP", "Sal"))]
                 backfill_points = []
                 for probe_did in backfill_probe_dids:
                     try:
-                        ilog = client._get(f"/api/apex/{apex_id}/ilog?days={BACKFILL_DAYS}").json()
+                        capped_days = min(backfill_days, 7)
+                        ilog = client._get(f"/api/apex/{apex_id}/ilog?days={capped_days}").json()
                         items = ilog if isinstance(ilog, list) else ilog.get("ilog", ilog.get("items", []))
                         for item in items:
                             entry_time = item.get("date", "")
@@ -332,28 +335,30 @@ def _collect_tenant(tcfg: dict) -> dict:
                     count = write_telemetry(tenant_id, backfill_points, apex_id=apex_id)
                     log.info("Tenant %s: backfilled %d historical probe points", tenant_id[:8], count)
 
-                # Mark backfill as complete in config_json
-                try:
-                    import asyncio
+                    # Mark backfill as complete in config_json (only on success)
+                    try:
+                        import asyncio
 
-                    async def _mark_backfill():
-                        async with engine.begin() as conn:
-                            import uuid
-                            tid = uuid.UUID(tenant_id)
-                            await conn.execute(
-                                text("""UPDATE tenant_configs
-                                    SET config_json = jsonb_set(
-                                        COALESCE(config_json::jsonb, '{}'::jsonb),
-                                        '{backfill_complete}',
-                                        'true'::jsonb
-                                    )
-                                    WHERE tenant_id = :tid"""),
-                                {"tid": tid}
-                            )
+                        async def _mark_backfill():
+                            async with engine.begin() as conn:
+                                import uuid
+                                tid = uuid.UUID(tenant_id)
+                                await conn.execute(
+                                    text("""UPDATE tenant_configs
+                                        SET config_json = jsonb_set(
+                                            COALESCE(config_json::jsonb, '{}'::jsonb),
+                                            '{backfill_complete}',
+                                            'true'::jsonb
+                                        )
+                                        WHERE tenant_id = :tid"""),
+                                    {"tid": tid}
+                                )
 
-                    task = asyncio.create_task(_mark_backfill())
-                except Exception as e:
-                    log.warning("Tenant %s: failed to mark backfill complete: %s", tenant_id[:8], e)
+                        task = asyncio.create_task(_mark_backfill())
+                    except Exception as e:
+                        log.warning("Tenant %s: failed to mark backfill complete: %s", tenant_id[:8], e)
+                else:
+                    log.info("Tenant %s: backfill fetched 0 points (will retry next cycle)", tenant_id[:8])
 
         # --- 7. Controller info (extracted from already-fetched detail) ---
         try:

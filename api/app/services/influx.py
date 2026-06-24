@@ -379,6 +379,10 @@ def write_notes(tenant_id: str, notes: list[dict], bucket_name: str = "", apex_i
             comment = ""
         has_comment = "yes" if comment.strip() else "no"
 
+        # Resolve note_id — Fusion API uses _id (MongoDB convention)
+        raw_id = n.get("id") or n.get("note_id") or n.get("_id") or n.get("ID") or ""
+        note_id = str(raw_id)
+
         point = Point("apex_logs") \
             .tag("tenant_id", tenant_id) \
             .tag("apex_id", apex_id) \

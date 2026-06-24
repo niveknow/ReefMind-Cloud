@@ -16,7 +16,10 @@ interface DiscoveredController {
   type: string;
   serial: string;
   hardware: string;
+  hardware_revision?: string;
   software: string;
+  software_version?: string;
+  timezone?: string;
   probes: { did: string; name: string; type: string; unit: string; value?: number }[];
   outlets: { did: string; name: string; type: string; state: string }[];
 }
@@ -55,13 +58,16 @@ export default function SettingsPage() {
   const [nemoModel, setNemoModel] = useState('deepseek-chat');
   const [savingNemo, setSavingNemo] = useState(false);
   const [nemoSaved, setNemoSaved] = useState(false);
-  // Controller info
-  const [ctrlInfo, setCtrlInfo] = useState<any>(null);
+  // Controller info from config_json
+  const [controllers, setControllers] = useState<DiscoveredController[]>([]);
+  // Backfill
+  const [backfillDays, setBackfillDays] = useState(30);
+  const [savingBackfill, setSavingBackfill] = useState(false);
+  const [backfillSaved, setBackfillSaved] = useState(false);
 
   useEffect(() => {
     loadStatus();
     loadConfig();
-    loadControllerInfo();
   }, []);
 
   const loadStatus = async () => {
@@ -82,14 +88,12 @@ export default function SettingsPage() {
       if (c.nemo_configured) {
         setNemoApiKey('********'); // masked — key never sent to frontend
       }
-    } catch { /* ignore */ }
-  };
-
-  const loadControllerInfo = async () => {
-    try {
-      const res = await api.get('/api/telemetry/controller');
-      const c = res.data.controller || {};
-      if (c.serial) setCtrlInfo(c);
+      // Parse controllers from config_json
+      try {
+        const parsed = JSON.parse(c.config_json || '{}');
+        setControllers(parsed.controllers || []);
+        setBackfillDays(parsed.backfill_days || 30);
+      } catch {}
     } catch { /* ignore */ }
   };
 
@@ -247,33 +251,109 @@ export default function SettingsPage() {
           )}
         </div>
 
-        {/* Controller Info */}
-        {ctrlInfo && (
+        {/* Controller Info from config_json */}
+        {controllers.length > 0 && (
           <div className="bg-slate-800 rounded-lg p-6 mb-6">
-            <h2 className="text-lg font-semibold text-white mb-2">🖥️ Controller Info</h2>
+            <h2 className="text-lg font-semibold text-white mb-2">
+              🖥️ Controllers ({controllers.length})
+            </h2>
             <p className="text-slate-400 text-sm mb-4">
-              Hardware and firmware details for your Apex controller.
+              Controllers discovered on your Apex Fusion account.
             </p>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-slate-700/50 rounded-lg p-3">
-                <span className="text-xs text-slate-400 block">Hardware</span>
-                <span className="text-white font-mono text-sm">{ctrlInfo.hardware || '—'}</span>
+            {controllers.map((ctrl, idx) => (
+              <div key={idx} className="bg-slate-700/50 rounded-lg p-4 mb-3">
+                <h3 className="text-teal-300 font-semibold text-base mb-2">
+                  {ctrl.name}
+                </h3>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <span className="text-xs text-slate-400 block">Model</span>
+                    <span className="text-white font-mono text-xs">{ctrl.type || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block">Serial</span>
+                    <span className="text-white font-mono text-xs">{ctrl.serial || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block">Hardware</span>
+                    <span className="text-white font-mono text-xs">{ctrl.hardware_revision || ctrl.hardware || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block">Firmware</span>
+                    <span className="text-white font-mono text-xs">{ctrl.software_version || ctrl.software || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block">Timezone</span>
+                    <span className="text-white font-mono text-xs">{ctrl.timezone || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block">Apex ID</span>
+                    <span className="text-white font-mono text-xs">{ctrl.apex_id || '—'}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-xs text-slate-400 block">Probes</span>
+                    <span className="text-white font-mono text-xs">{ctrl.probes?.length || 0}</span>
+                  </div>
+                </div>
               </div>
-              <div className="bg-slate-700/50 rounded-lg p-3">
-                <span className="text-xs text-slate-400 block">Firmware</span>
-                <span className="text-white font-mono text-sm">{ctrlInfo.software || '—'}</span>
-              </div>
-              <div className="bg-slate-700/50 rounded-lg p-3">
-                <span className="text-xs text-slate-400 block">Serial</span>
-                <span className="text-white font-mono text-sm">{ctrlInfo.serial || '—'}</span>
-              </div>
-              <div className="bg-slate-700/50 rounded-lg p-3">
-                <span className="text-xs text-slate-400 block">Timezone</span>
-                <span className="text-white font-mono text-sm">{ctrlInfo.timezone || '—'}</span>
-              </div>
-            </div>
+            ))}
           </div>
         )}
+
+        {controllers.length === 0 && (
+          <div className="bg-slate-800 rounded-lg p-6 mb-6">
+            <h2 className="text-lg font-semibold text-white mb-2">🖥️ Controllers</h2>
+            <p className="text-slate-400 text-sm">
+              No controllers discovered yet. Use the <strong>Discover My Tank</strong> button above to find your Apex controllers.
+            </p>
+          </div>
+        )}
+
+        {/* Historical Data Backfill */}
+        <div className="bg-slate-800 rounded-lg p-6 mb-6">
+          <h2 className="text-lg font-semibold text-white mb-2">📊 Historical Data Backfill</h2>
+          <p className="text-slate-400 text-sm mb-4">
+            Backfill historical probe data when first connecting your tank.
+            Changing this resets the backfill flag — data will re-sync on the next collection cycle.
+          </p>
+          <div className="flex items-center gap-3 mb-4">
+            <select
+              value={backfillDays}
+              onChange={e => setBackfillDays(Number(e.target.value))}
+              className="bg-slate-700 text-white rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+            >
+              <option value={30}>30 Days</option>
+              <option value={60}>60 Days</option>
+              <option value={90}>90 Days</option>
+            </select>
+            <button
+              onClick={async () => {
+                setSavingBackfill(true);
+                setError('');
+                try {
+                  await api.put('/api/tenant/config', { backfill_days: backfillDays });
+                  setBackfillSaved(true);
+                  setSuccess('Backfill settings saved! Data will re-sync on next collection.');
+                  setTimeout(() => setBackfillSaved(false), 5000);
+                } catch (err: any) {
+                  setError(err.response?.data?.detail || 'Failed to save backfill settings');
+                } finally {
+                  setSavingBackfill(false);
+                }
+              }}
+              disabled={savingBackfill}
+              className="bg-teal-600 hover:bg-teal-500 text-white font-semibold px-4 py-2 rounded disabled:opacity-50 transition"
+            >
+              {savingBackfill ? 'Saving...' : 'Apply Backfill'}
+            </button>
+            {backfillSaved && <span className="text-green-400 text-sm">✅ Saved!</span>}
+          </div>
+          <div className="bg-amber-900/30 text-amber-300 rounded px-4 py-3 text-xs leading-relaxed">
+            <strong>⚠️ API Note:</strong> Apex Fusion caps historical probe data at ~7 days.
+            After the initial backfill, the system accumulates data via live 5-minute polling.
+            The 30/60/90 day options set how much data eventually appears as the collector runs over time.
+          </div>
+        </div>
 
         {/* AI Assistant */}
         <div className="bg-slate-800 rounded-lg p-6 mb-6">

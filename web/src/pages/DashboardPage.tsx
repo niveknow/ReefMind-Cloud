@@ -42,6 +42,11 @@ function getMeta(type: string) {
   return PROBE_META[type] || { icon: '📡', color: 'bg-slate-700/50', chartColor: '#94a3b8' };
 }
 
+const getHoursFromDuration = (duration: string): number => {
+  if (duration.endsWith('d')) return parseInt(duration) * 24;
+  return parseInt(duration); // already in hours (e.g. '6h' → 6)
+};
+
 export default function DashboardPage() {
   const [summary, setSummary] = useState<{ readings: Reading[]; source?: string }>({ readings: [] });
   const [probeData, setProbeData] = useState<Record<string, any[]>>({});
@@ -190,7 +195,7 @@ export default function DashboardPage() {
 
   const loadFusionProbeHistory = async (did: string) => {
     try {
-      const hours = parseInt(duration.replace('h', '').replace('d', '24'));
+      const hours = getHoursFromDuration(duration);
       const res = await api.get(`/api/fusion/history/${encodeURIComponent(did)}?hours=${hours}`);
       if (res.data?.data?.length > 0) {
         setProbeData(prev => ({ ...prev, [did]: res.data.data }));
@@ -284,7 +289,7 @@ export default function DashboardPage() {
         {/* Duration selector — only show when there's data to chart */}
         {hasData && activeTab !== 'overview' && activeTab !== 'outlets' && (
           <div className="flex gap-2 mb-4">
-            {['1h', '6h', '24h'].map(d => (
+            {['1h', '6h', '24h', '30d', '60d', '90d'].map(d => (
               <button key={d} onClick={() => setDuration(d)}
                 className={`px-3 py-1 rounded text-sm ${duration === d ? 'bg-teal-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
                 {d}

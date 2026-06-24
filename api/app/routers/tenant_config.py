@@ -45,6 +45,7 @@ async def update_config(
     user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    import json
     tenant_id = user.get("tenant_id", "")
     if not tenant_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -80,6 +81,12 @@ async def update_config(
         existing["backfill_days"] = int(data["backfill_days"])
         existing["backfill_complete"] = False  # reset to trigger re-backfill
         config.config_json = json.dumps(existing)
+
+    if "backfill_days" in data:
+        cfg_meta = json.loads(config.config_json) if config.config_json else {}
+        cfg_meta["backfill_days"] = data["backfill_days"]
+        cfg_meta["backfill_complete"] = False  # Reset to trigger re-backfill
+        config.config_json = json.dumps(cfg_meta)
 
     await db.commit()
     return {"status": "ok"}
