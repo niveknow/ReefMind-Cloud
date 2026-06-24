@@ -319,11 +319,15 @@ def _collect_tenant(tcfg: dict) -> dict:
                             nid = str(n.get("id") or n.get("_id") or n.get("note_id") or n.get("date", ""))
                             n_type = n.get("type", 0)
                             if isinstance(n_type, str): n_type = int(n_type)
+                            from app.services.influx import REASON_TITLES as _REASON_TITLES
                             n_type_name = {0: "Basic", 1: "Good", 2: "Bad", 3: "Ugly", 4: "Maintenance", 5: "Event"}.get(n_type, f"Type_{n_type}")
                             reason = n.get("reason", 0)
                             if isinstance(reason, str): reason = int(reason)
-                            title_esc = (n.get("title", "") or "").replace('"', '\\"').replace(",", "\\,").replace(" ", "\\ ")
-                            comment_esc = (n.get("text", "") or "").replace('"', '\\"')
+                            title_raw = (n.get("title", "") or "")
+                            if not title_raw:
+                                title_raw = _REASON_TITLES.get((n_type, reason), n_type_name)
+                            title_esc = title_raw.replace('"', '\\"').replace(",", "\\,").replace(" ", "\\ ").replace("=", "\\=")
+                            comment_esc = (n.get("text", "") or "").replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r")
                             ts = n.get("date", "")
                             if not ts: continue
                             try:
