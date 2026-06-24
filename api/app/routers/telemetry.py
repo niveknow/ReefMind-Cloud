@@ -1,3 +1,5 @@
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.middleware.auth import get_current_user
 from app.services.influx import query_telemetry, query_outlets, query_water_tests, query_notes, query_controller_info
@@ -64,13 +66,50 @@ async def get_notes(user: dict = Depends(get_current_user)):
 
 
 @router.get("/controller")
-async def get_controller_info(user: dict = Depends(get_current_user)):
-    """Get controller hardware/software/serial info."""
+async def get_controller_info(
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all discovered controllers for this tenant."""
     tenant_id = user.get("tenant_id", "")
     if not tenant_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    info = query_controller_info(tenant_id)
-    return {"controller": info}
+
+    import uuid
+    from sqlalchemy import select
+    from app.models.tenant import TenantConfig
+    
+    try:
+        tid = uuid.UUID(tenant_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid tenant ID")
+    
+    result = await db.execute(select(TenantConfig).where(TenantConfig.tenant_id == tid))
+    config = result.scalar_one_or_none()
+    if not config or not config.config_json:
+        return {"controllers": []}
+
+    import json
+    try:
+        meta = json.loads(config.config_json) if isinstance(config.config_json, str) else config.config_json
+    except (json.JSONDecodeError, TypeError):
+        return {"controllers": []}
+    
+    controllers = meta.get("controllers", [])
+    # Return lightweight entries with just system info (not full probe/outlet lists)
+    simplified = []
+    for c in controllers:
+        simplified.append({
+            "apex_id": c.get("apex_id", ""),
+            "name": c.get("name", ""),
+            "type": c.get("type", ""),
+            "serial": c.get("serial", ""),
+            "hardware": c.get("hardware", ""),
+            "software": c.get("software", ""),
+            "timezone": c.get("timezone", ""),
+        })
+    
+    return {"controllers": simplified}
 
 
 @router.get("/{probe_name}")

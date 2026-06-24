@@ -71,6 +71,15 @@ async def update_config(
         config.nemo_provider = data["nemo_provider"]
     if "nemo_model" in data:
         config.nemo_model = data["nemo_model"]
+    if "backfill_days" in data:
+        import json
+        try:
+            existing = json.loads(config.config_json) if isinstance(config.config_json, str) else config.config_json or {}
+        except (json.JSONDecodeError, TypeError):
+            existing = {}
+        existing["backfill_days"] = int(data["backfill_days"])
+        existing["backfill_complete"] = False  # reset to trigger re-backfill
+        config.config_json = json.dumps(existing)
 
     await db.commit()
     return {"status": "ok"}
