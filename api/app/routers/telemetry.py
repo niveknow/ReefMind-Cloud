@@ -35,20 +35,6 @@ async def get_outlets(user: dict = Depends(get_current_user)):
     return {"outlets": results, "source": "agent"}
 
 
-@router.get("/{probe_name}")
-async def get_probe_data(
-    probe_name: str,
-    duration: str = Query("24h", description="Time range (e.g. 24h, 7d, 30d)"),
-    user: dict = Depends(get_current_user),
-):
-    tenant_id = user.get("tenant_id", "")
-    if not tenant_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    results = query_telemetry(tenant_id, probe_name=probe_name, duration=duration)
-    return {"probe": probe_name, "data": results}
-
-
 @router.get("/water-tests")
 async def get_water_tests(user: dict = Depends(get_current_user)):
     """Get all water test results for this tenant.
@@ -85,5 +71,19 @@ async def get_controller_info(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=401, detail="Not authenticated")
     info = query_controller_info(tenant_id)
     return {"controller": info}
+
+
+@router.get("/{probe_name}")
+async def get_probe_data(
+    probe_name: str,
+    duration: str = Query("24h", description="Time range (e.g. 24h, 7d, 30d)"),
+    user: dict = Depends(get_current_user),
+):
+    tenant_id = user.get("tenant_id", "")
+    if not tenant_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    results = query_telemetry(tenant_id, probe_name=probe_name, duration=duration)
+    return {"probe": probe_name, "data": results}
 
 
