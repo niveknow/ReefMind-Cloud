@@ -308,6 +308,22 @@ def _collect_tenant(tcfg: dict) -> dict:
                     notes_data = client.get_all_notes(apex_id, days=30)
                 
                 if notes_data:
+                    # Fresh InfluxDB client for backfill write (avoids stale connection pool)
+                    if not notes_backfill_done:
+                        from app.services.influx import get_influx_client
+                        old = get_influx_client()
+                        old.close()
+                        # Force fresh client
+                        import influxdb_client
+                        from app.config import get_settings
+                        s = get_settings()
+                        fresh = influxdb_client.InfluxDBClient(
+                            url=s.influx_url, token=s.influx_token, org=s.influx_org
+                        )
+                        # Store as global _client
+                        import app.services.influx as influx_mod
+                        influx_mod._client = fresh
+                    
                     count = write_notes(tenant_id, notes_data, apex_id=apex_id)
                     result["notes"] = count
                     log.info("Tenant %s: wrote %d notes (%s)", tenant_id[:8], count, 
