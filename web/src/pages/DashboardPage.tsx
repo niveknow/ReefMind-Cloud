@@ -173,7 +173,7 @@ export default function DashboardPage() {
         loadAgentProbeHistory(activeProbe.probeName);
       }
     }
-  }, [activeTab, dataSource]);
+  }, [activeTab, dataSource, duration]);
 
   // Also preload overview charts
   useEffect(() => {
@@ -186,7 +186,7 @@ export default function DashboardPage() {
         }
       }
     }
-  }, [summary, dataSource]);
+  }, [summary, dataSource, duration]);
 
   const loadFusionProbeHistory = async (did: string) => {
     try {
