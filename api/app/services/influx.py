@@ -408,7 +408,7 @@ def write_notes(tenant_id: str, notes: list[dict], bucket_name: str = "", apex_i
             return 0
     return len(points)
 
-def query_notes(tenant_id: str, duration: str = "730d", limit: int = 100) -> list:
+def query_notes(tenant_id: str, duration: str = "730d", limit: int = 0) -> list:
     bucket = ensure_tenant_bucket(tenant_id)
     client = get_influx_client()
     query_api = client.query_api()
@@ -447,7 +447,9 @@ def query_notes(tenant_id: str, duration: str = "730d", limit: int = 100) -> lis
                 notes_map[nid]["comment"] = record.get_value() or ""
 
     sorted_notes = sorted(notes_map.values(), key=lambda n: n.get("time", ""), reverse=True)
-    return sorted_notes[:limit]
+    if limit > 0:
+        return sorted_notes[:limit]
+    return sorted_notes
 
 
 def write_controller_info(tenant_id: str, info: dict, apex_id: str = "") -> int:
