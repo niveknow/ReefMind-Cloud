@@ -50,7 +50,9 @@ NEMO_SYSTEM_PROMPT = """You are Nemo, a knowledgeable reef-keeping AI assistant.
 - Aquarium troubleshooting
 - General reefing best practices
 
-When the user's tank data is available (provided below in TANK DATA), use it to give personalized, specific advice about their actual readings and equipment. When no tank data is provided, give general advice.
+TANK DATA is provided below with live readings, water test history (365 days), tank notes (90 days), and probe history trends (24h, 7d, 30d ranges). Use this data to give personalized, specific advice. You CAN reference historical values — for example, you can compare current water tests against previous test dates, identify trends from the probe ranges, and reference past notes/events.
+
+If the user asks about a specific date range not fully covered by the provided trends, explain what data you do have and give the best analysis possible from the ranges shown.
 
 Answer clearly and concisely. If you don't know something, say so. Always prioritize the safety of the aquarium's inhabitants."""
 
@@ -183,60 +185,69 @@ def _build_live_context(config: TenantConfig) -> str:
     # ---- InfluxDB historical data (compact, always included) ----
     tenant_id = str(config.tenant_id)
 
-    # Water tests — latest per parameter
+    # Water tests — all records grouped by date (not just latest)
     try:
         wt = query_water_tests(tenant_id, duration="365d")
         if wt:
-            latest: dict[str, dict] = {}
+            # Group water tests by date
+            from collections import defaultdict
+            by_date: dict[str, dict[str, float]] = defaultdict(dict)
+            date_order: list[str] = []
             for r in wt:
-                param = r["parameter"]
-                if param not in latest or r["time"] > latest[param]["time"]:
-                    latest[param] = r
-            wt_str = ", ".join(
-                f"{p}={v['value']}{v['unit']}" for p, v in sorted(latest.items())
-            )
-            parts.append(f"Water tests: {wt_str}")
+                d = r["time"][:10]  # YYYY-MM-DD
+                if d not in by_date:
+                    date_order.append(d)
+                by_date[d][r["parameter"]] = r["value"]
+            # Show last 12 test dates (most recent first)
+            wt_lines = []
+            for d in reversed(date_order[-12:]):
+                params = by_date[d]
+                vals = ", ".join(f"{p}={v}" for p, v in sorted(params.items()))
+                wt_lines.append(f"{d}: {vals}")
+            parts.append(f"Water test history ({len(wt)} records, last {len(wt_lines)} dates):\n  " + "\n  ".join(wt_lines))
     except Exception:
         pass  # non-fatal
 
-    # Notes — last 10
+    # Notes — last 10 with dates
     try:
         notes = query_notes(tenant_id, duration="90d", limit=10)
         if notes:
             note_lines = []
             for n in notes:
+                d = n.get("time", "")[:10]
                 tname = n.get("type_name", "")
                 emoji = {"Event": "📌", "Maintenance": "🔧", "Good": "✅",
                          "Bad": "⚠️", "Ugly": "🚨"}.get(tname, "📝")
                 title = n.get("title", "(untitled)")
-                note_lines.append(f"{emoji} {title}")
-            parts.append("Recent notes: " + " | ".join(note_lines))
+                note_lines.append(f"{d} {emoji} {title}")
+            parts.append("Recent notes:\n  " + "\n  ".join(note_lines))
     except Exception:
         pass
 
-    # Probe history — 24h min/max/avg per probe
-    try:
-        all_data = query_telemetry(tenant_id, duration="24h")
-        if all_data:
-            from collections import defaultdict
-            probe_stats: dict[str, dict] = defaultdict(lambda: {"values": [], "unit": ""})
-            for r in all_data:
-                name = r.get("probe_name", "")
-                if name:
-                    probe_stats[name]["values"].append(r.get("value", 0))
-                    probe_stats[name]["unit"] = r.get("unit", "")
+    # Probe history — 24h, 7d, 30d min/max/avg per probe
+    for duration_label, duration_val in [("24h", "24h"), ("7d", "7d"), ("30d", "30d")]:
+        try:
+            all_data = query_telemetry(tenant_id, duration=duration_val)
+            if all_data:
+                from collections import defaultdict
+                probe_stats: dict[str, dict] = defaultdict(lambda: {"values": [], "unit": ""})
+                for r in all_data:
+                    name = r.get("probe_name", "")
+                    if name:
+                        probe_stats[name]["values"].append(r.get("value", 0))
+                        probe_stats[name]["unit"] = r.get("unit", "")
 
-            stat_lines = []
-            for name, data in sorted(probe_stats.items()):
-                vals = data["values"]
-                unit = data["unit"]
-                if vals:
-                    mn, mx, avg = min(vals), max(vals), round(sum(vals) / len(vals), 2)
-                    stat_lines.append(f"{name} {mn}-{mx} ({avg} avg){unit}")
-            if stat_lines:
-                parts.append("24h trends: " + "; ".join(stat_lines))
-    except Exception:
-        pass
+                stat_lines = []
+                for name, data in sorted(probe_stats.items()):
+                    vals = data["values"]
+                    unit = data["unit"]
+                    if vals:
+                        mn, mx, avg = min(vals), max(vals), round(sum(vals) / len(vals), 2)
+                        stat_lines.append(f"{name} {mn}-{mx} ({avg} avg){unit}")
+                if stat_lines:
+                    parts.append(f"Probe trend ({duration_label}): " + "; ".join(stat_lines))
+        except Exception:
+            pass
 
     context = " | ".join(parts)
 
