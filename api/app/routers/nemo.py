@@ -50,7 +50,7 @@ NEMO_SYSTEM_PROMPT = """You are Nemo, a knowledgeable reef-keeping AI assistant.
 - Aquarium troubleshooting
 - General reefing best practices
 
-TANK DATA is provided below with live readings, water test history (365 days), tank notes (90 days), and probe history trends (24h, 7d, 30d ranges). Use this data to give personalized, specific advice. You CAN reference historical values — for example, you can compare current water tests against previous test dates, identify trends from the probe ranges, and reference past notes/events.
+TANK DATA is provided below with live readings, water test history (365 days), tank notes (90 days), and probe history trends (24h, 7d, 30d, 90d ranges). Use this data to give personalized, specific advice. You CAN reference historical values — for example, you can compare current water tests against previous test dates, identify trends from the probe ranges, and reference past notes/events.
 
 If the user asks about a specific date range not fully covered by the provided trends, explain what data you do have and give the best analysis possible from the ranges shown.
 
@@ -225,7 +225,7 @@ def _build_live_context(config: TenantConfig) -> str:
         pass
 
     # Probe history — 24h, 7d, 30d min/max/avg per probe
-    for duration_label, duration_val in [("24h", "24h"), ("7d", "7d"), ("30d", "30d")]:
+    for duration_label, duration_val in [("24h", "24h"), ("7d", "7d"), ("30d", "30d"), ("90d", "90d")]:
         try:
             all_data = query_telemetry(tenant_id, duration=duration_val)
             if all_data:
