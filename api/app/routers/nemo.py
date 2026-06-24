@@ -50,7 +50,7 @@ NEMO_SYSTEM_PROMPT = """You are Nemo, a knowledgeable reef-keeping AI assistant.
 - Aquarium troubleshooting
 - General reefing best practices
 
-TANK DATA is provided below with live readings, water test history (365 days), tank notes (90 days), and probe history trends (24h, 7d, 30d, 90d ranges). Use this data to give personalized, specific advice. You CAN reference historical values — for example, you can compare current water tests against previous test dates, identify trends from the probe ranges, and reference past notes/events.
+TANK DATA is provided below with live readings, water test history (365 days), tank notes (2 years), and probe history trends (24h, 7d, 30d, 90d ranges). Use this data to give personalized, specific advice. You CAN reference historical values — for example, you can compare current water tests against previous test dates, identify trends from the probe ranges, and reference past notes/events.
 
 If the user asks about a specific date range not fully covered by the provided trends, explain what data you do have and give the best analysis possible from the ranges shown.
 
@@ -208,9 +208,9 @@ def _build_live_context(config: TenantConfig) -> str:
     except Exception:
         pass  # non-fatal
 
-    # Notes — last 10 with dates
+    # Notes — last 50 with dates and details
     try:
-        notes = query_notes(tenant_id, duration="90d", limit=10)
+        notes = query_notes(tenant_id, duration="730d", limit=50)
         if notes:
             note_lines = []
             for n in notes:
@@ -219,7 +219,11 @@ def _build_live_context(config: TenantConfig) -> str:
                 emoji = {"Event": "📌", "Maintenance": "🔧", "Good": "✅",
                          "Bad": "⚠️", "Ugly": "🚨"}.get(tname, "📝")
                 title = n.get("title", "(untitled)")
-                note_lines.append(f"{d} {emoji} {title}")
+                comment = n.get("comment", "")
+                if comment:
+                    note_lines.append(f"{d} {emoji} {title}: {comment}")
+                else:
+                    note_lines.append(f"{d} {emoji} {title}")
             parts.append("Recent notes:\n  " + "\n  ".join(note_lines))
     except Exception:
         pass
