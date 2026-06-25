@@ -492,6 +492,95 @@ export default function SettingsPage() {
           </div>
         )}
 
+        {/* 📁 Import Dashboard */}
+        <div className="bg-slate-800 rounded-lg p-6 mb-6">
+          <h2 className="text-lg font-semibold text-white mb-2">📁 Import Dashboard</h2>
+          <p className="text-slate-400 text-sm mb-4">
+            Upload a dashboard definition JSON file to add custom layouts to your dashboard.
+            Use the tab selector at the top of the dashboard to switch between layouts.
+          </p>
+          <div className="bg-slate-700/30 border border-dashed border-slate-600/50 rounded-lg p-6 text-center">
+            <div className="text-3xl mb-2">📄</div>
+            <p className="text-slate-400 text-sm mb-3">
+              Upload a <code className="text-teal-300 bg-slate-700 px-1 rounded">.json</code> file with a <strong>DashboardDef</strong> schema
+            </p>
+            <label className="inline-block bg-teal-600 hover:bg-teal-500 text-white font-semibold px-6 py-2 rounded cursor-pointer transition disabled:opacity-50"
+              id="dashboard-import-label">
+              Choose File
+              <input
+                type="file"
+                accept=".json"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = (ev) => {
+                    try {
+                      const def = JSON.parse(ev.target?.result as string);
+                      if (!def.id || !def.name || !def.layout) {
+                        setError('Invalid dashboard definition: missing id, name, or layout');
+                        return;
+                      }
+                      // Save to localStorage
+                      const raw = localStorage.getItem('reefmind_dashboards');
+                      const layouts = raw ? JSON.parse(raw) : [];
+                      const idx = layouts.findIndex((l: any) => l.id === def.id);
+                      const entry = { id: def.id, name: def.name, def, importedAt: new Date().toISOString() };
+                      if (idx >= 0) layouts[idx] = entry;
+                      else layouts.push(entry);
+                      localStorage.setItem('reefmind_dashboards', JSON.stringify(layouts));
+                      setSuccess(`Dashboard "${def.name}" imported! Go to Dashboard to view it.`);
+                    } catch {
+                      setError('Failed to parse JSON file');
+                    }
+                  };
+                  reader.readAsText(file);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+          </div>
+          <div className="mt-3">
+            <details className="text-xs text-slate-500">
+              <summary className="cursor-pointer hover:text-slate-300">View JSON schema reference</summary>
+              <pre className="mt-2 bg-slate-900 rounded p-3 text-slate-400 overflow-x-auto leading-relaxed">
+{`{
+  "id": "my-dash",
+  "name": "My Dashboard",
+  "description": "Optional description",
+  "layout": [
+    {
+      "i": "widget-1",
+      "type": "CaRxPanel",
+      "x": 0, "y": 0, "w": 6, "h": 2
+    },
+    {
+      "i": "chart-1",
+      "type": "TimeSeriesChart",
+      "x": 6, "y": 0, "w": 6, "h": 3,
+      "props": { "id": "pH", "title": "pH", "color": "#a855f7" }
+    },
+    {
+      "i": "probe-1",
+      "type": "ProbeCard",
+      "x": 0, "y": 2, "w": 3, "h": 1,
+      "props": { "probeId": "Temp", "label": "Temp", "unit": "°F" }
+    },
+    {
+      "i": "outlets-1",
+      "type": "OutletGrid",
+      "x": 0, "y": 3, "w": 12, "h": 3
+    }
+  ]
+}
+
+Widget types: CaRxPanel, TimeSeriesChart,
+ProbeCard, OutletGrid, NemoWidget`}</pre>
+            </details>
+          </div>
+        </div>
+
         {/* Navigation */}
         <div className="flex gap-4">
           <a href="/dashboard" className="text-teal-400 hover:underline text-sm">← Back to Dashboard</a>
