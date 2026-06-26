@@ -2,7 +2,7 @@
 
 **Cloud-based multi-tenant SaaS platform for Neptune Apex aquarium controllers.**
 
-Collect telemetry from your Apex controller, visualize real-time probe readings and outlet states, browse tank notes with month/week filtering, and get AI-powered reef-keeping advice — all without running a local database or Grafana instance.
+Collect telemetry from your Apex controller, visualize real-time probe readings and outlet states, browse tank notes with month/week filtering, and get AI-powered reef-keeping advice — all without running a local database or Grafana instance. While the Apex APIs allow you to control the Apex just like you can on Fusion, this is read-only at the moment.  The intent at this stage is not to replace the Apex Fusion as a controller, but to allow an AI layer and take back your data for backup purposes.  
 
 > **Version:** v0.1.4 — Notes History & Nemo Insights  
 > **Status:** Working prototype (Docker-based deployment)  
