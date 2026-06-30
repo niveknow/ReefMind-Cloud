@@ -3,12 +3,33 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 import logging
+import threading
 
 # Configure logging so collector output is visible
 logging.basicConfig(
     level=logging.INFO,
     format="%(levelname)s:%(name)s: %(message)s",
 )
+
+
+def _run_collector_loop():
+    """Run the collector_loop in a dedicated thread with its own event loop.
+    
+    This avoids issues with uvicorn's lifespan not reliably scheduling async
+    background tasks on the main event loop under --reload mode.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        from app.services.collector import collector_loop
+        print("Fusion collector thread started (polling every 300s)")
+        loop.run_until_complete(collector_loop())
+    except Exception as e:
+        print(f"Fusion collector thread crashed: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        loop.close()
 
 
 @asynccontextmanager
@@ -21,30 +42,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"Database init skipped (will retry on first request): {e}")
 
-    # Start the Fusion data collector in the background
-    collector_task = None
-    try:
-        from app.services.collector import collector_loop
-        collector_task = asyncio.create_task(collector_loop())
-        print("Fusion data collector started (every 5 minutes)")
-    except Exception as e:
-        print(f"Fusion collector could not start: {e}")
+    # Start the Fusion data collector in a background thread
+    collector_thread = threading.Thread(target=_run_collector_loop, daemon=True)
+    collector_thread.start()
+    print("Fusion data collector launched in background thread")
 
     yield
-    # Shutdown
-    if collector_task:
-        collector_task.cancel()
-        try:
-            await collector_task
-        except asyncio.CancelledError:
-            pass
+    # Shutdown — daemon thread will be terminated automatically
     await close_db()
 
 
 app = FastAPI(
     title="ReefMind SaaS API",
     description="Cloud API for ReefMind reef aquarium monitoring",
-    version="0.1.3",
+    version="0.1.5",
+    lifespan=lifespan,
 )
 
 # CORS — allow all origins in dev
@@ -59,7 +71,7 @@ app.add_middleware(
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "reefmind-api", "version": "0.1.3"}
+    return {"status": "ok", "service": "reefmind-api", "version": "0.1.5"}
 
 
 # Mount routers

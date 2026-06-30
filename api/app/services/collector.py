@@ -511,9 +511,27 @@ def _collect_tenant(tcfg: dict) -> dict:
 # Background collector loop
 # ---------------------------------------------------------------------------
 
+_collector_engine = None
+
+async def _get_collector_engine():
+    """Get or create a collector-specific engine on the current event loop.
+    
+    The collector runs in a background thread with its own asyncio event loop,
+    so it cannot use the module-level engine from database.py (which is bound
+    to the main event loop). We create a separate engine here.
+    """
+    global _collector_engine
+    if _collector_engine is None:
+        from app.config import get_settings
+        from sqlalchemy.ext.asyncio import create_async_engine
+        settings = get_settings()
+        _collector_engine = create_async_engine(settings.database_url, echo=False)
+    return _collector_engine
+
+
 async def _get_configured_tenants():
     """Get all tenant configs with Fusion credentials."""
-    from app.database import engine
+    engine = await _get_collector_engine()
     async with engine.connect() as conn:
         result = await conn.execute(
             text("""
